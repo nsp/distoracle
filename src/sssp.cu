@@ -11,36 +11,50 @@ int edge_list_size=0;
 FILE *fp;
 
 __global__ void
-DijkastraKernel(int* g_graph_nodes, int* g_graph_edges,short int* g_graph_weights,
-				int* g_graph_updating_cost, bool* g_graph_mask,
-				int* g_cost , int no_of_nodes, int edge_list_size) {
-	int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
-	int i,end,id;
-	if(tid<no_of_nodes && g_graph_mask[tid]) {
-		if(tid < no_of_nodes-1)
-			end = g_graph_nodes[tid+1];
-		else
-			end = edge_list_size;
-		for(i = g_graph_nodes[tid]; i< end; i++) {
-			id = g_graph_edges[i];
-			atomicMin(&g_graph_updating_cost[id], g_cost[tid]+g_graph_weights[i]);
-		}
-		g_graph_mask[tid]=false;
-	}
+DijkstraKernel1(int* g_graph_nodes, int* g_graph_edges,
+		 short int* g_graph_weights,
+		 int* g_graph_updating_cost, bool* g_graph_mask,
+		 int* g_cost , int no_of_nodes, int edge_list_size) {
+  int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
+  int i,end,id;
+  if(tid<no_of_nodes && g_graph_mask[tid]) {
+    if(tid < no_of_nodes-1)
+      end = g_graph_nodes[tid+1];
+    else
+      end = edge_list_size;
+    for(i = g_graph_nodes[tid]; i< end; i++) {
+      id = g_graph_edges[i];
+      atomicMin(&g_graph_updating_cost[id], g_cost[tid]+g_graph_weights[i]);
+    }
+    g_graph_mask[tid]=false;
+  }
 }
 
+__global__ void
+DijkstraKernel2(int* g_graph_nodes, int* g_graph_edges,short int* g_graph_weights, 
+		 int* g_graph_updating_cost, bool* g_graph_mask, 
+		 int* g_cost , bool *d_finished, int no_of_nodes, int edge_list_size) {
+  int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
+  if(tid<no_of_nodes && g_cost[tid] > g_graph_updating_cost[tid]) {
+    g_cost[tid] = g_graph_updating_cost[tid];
+    g_graph_mask[tid] = true;
+    *d_finished = true;
+  }
+  if(tid<no_of_nodes)
+    g_graph_updating_cost[tid] = g_cost[tid];
+}
 
 /**
  * This macro checks return value of the CUDA runtime call and exits
  * the application if the call failed.
  */
-#define CUDA_CHECK_RETURN(value) {											\
-	cudaError_t _m_cudaStat = value;										\
-	if (_m_cudaStat != cudaSuccess) {										\
-		fprintf(stderr, "Error %s at line %d in file %s\n",					\
-				cudaGetErrorString(_m_cudaStat), __LINE__, __FILE__);		\
-		exit(1);															\
-	} }
+#define CUDA_CHECK_RETURN(value) {                                    \
+    cudaError_t _m_cudaStat = value;                                  \
+    if (_m_cudaStat != cudaSuccess) {                                 \
+        fprintf(stderr, "Error %s at line %d in file %s\n",           \
+                cudaGetErrorString(_m_cudaStat), __LINE__, __FILE__); \
+        exit(1);                                                      \
+    } }
 
 int main( int argc, char** argv) {
 
@@ -78,7 +92,7 @@ int main( int argc, char** argv) {
     for( unsigned int i = 0; i < no_of_nodes; i++) {
       fscanf(fp,"%d %d",&start,&edgeno);
       if(edgeno>100)
-	no++;
+    no++;
       h_graph_nodes[i] = start;
       h_graph_updating_cost[i] = MAX_COST;
       h_graph_mask[i]=false;
@@ -131,6 +145,7 @@ int main( int argc, char** argv) {
     int* h_cost = (int*) malloc( sizeof(int)*no_of_nodes);
     for(int i=0;i<no_of_nodes;i++) h_cost[i]= MAX_COST;
     h_cost[source]=0;
+
     // allocate device memory for result
     int* d_cost;
     CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_cost, sizeof(int)*no_of_nodes));
@@ -141,7 +156,6 @@ int main( int argc, char** argv) {
     CUDA_CHECK_RETURN( cudaMemcpy( d_graph_updating_cost, h_graph_updating_cost, sizeof(int)*no_of_nodes, cudaMemcpyHostToDevice) );
 
     //make a bool to check if the execution is over
-
     bool *d_finished;
     bool finished;
     CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_finished, sizeof(bool)));
@@ -150,15 +164,22 @@ int main( int argc, char** argv) {
     dim3  grid( num_of_blocks, 1, 1);
     dim3  threads( num_of_threads_per_block, 1, 1);
 
-    DijkastraKernel<<< grid, threads, 0 >>>( d_graph_nodes, d_graph_edges, d_graph_weights, d_graph_updating_cost,
-    		d_graph_mask, d_cost, no_of_nodes, edge_list_size);
-    CUDA_CHECK_RETURN(cudaThreadSynchronize());	// Wait for the GPU launched work to complete
-    CUDA_CHECK_RETURN(cudaGetLastError());
-    CUDA_CHECK_RETURN( cudaMemcpy( d_finished, &finished, sizeof(bool), cudaMemcpyHostToDevice) );
+    int k=0;
+    do {
+      DijkstraKernel1<<< grid, threads, 0 >>>( d_graph_nodes, d_graph_edges, d_graph_weights, d_graph_updating_cost,
+					       d_graph_mask, d_cost, no_of_nodes, edge_list_size );
+      k++;
+      finished = false;
+      CUDA_CHECK_RETURN( cudaMemcpy( d_finished, &finished, sizeof(bool), cudaMemcpyHostToDevice ) );
+      DijkstraKernel2<<< grid, threads, 0 >>>( d_graph_nodes, d_graph_edges, d_graph_weights, d_graph_updating_cost,
+					       d_graph_mask, d_cost, d_finished, no_of_nodes, edge_list_size );
+      CUDA_CHECK_RETURN( cudaThreadSynchronize() );    // Wait for the GPU launched work to complete
+      CUDA_CHECK_RETURN( cudaGetLastError() );
+      CUDA_CHECK_RETURN( cudaMemcpy( &finished, d_finished, sizeof(bool), cudaMemcpyDeviceToHost ) );
+    } while( finished );
 
     // copy result from device to host
     CUDA_CHECK_RETURN( cudaMemcpy( h_cost, d_cost, sizeof(int)*no_of_nodes, cudaMemcpyDeviceToHost) );
-
 
     //Store the result into a file
     FILE *fpo = fopen("result.txt","w");
@@ -168,12 +189,12 @@ int main( int argc, char** argv) {
     printf("Result stored in result.txt\n");
 
     // cleanup memory
-    free( h_graph_nodes);
-    free( h_graph_edges);
-    free( h_graph_mask);
-    free( h_graph_weights);
-    free( h_graph_updating_cost);
-    free( h_cost);
+    free(h_graph_nodes);
+    free(h_graph_edges);
+    free(h_graph_mask);
+    free(h_graph_weights);
+    free(h_graph_updating_cost);
+    free(h_cost);
     CUDA_CHECK_RETURN(cudaFree(d_graph_nodes));
     CUDA_CHECK_RETURN(cudaFree(d_graph_edges));
     CUDA_CHECK_RETURN(cudaFree(d_graph_mask));
@@ -181,6 +202,6 @@ int main( int argc, char** argv) {
     CUDA_CHECK_RETURN(cudaFree(d_graph_updating_cost));
     CUDA_CHECK_RETURN(cudaFree(d_cost));
     CUDA_CHECK_RETURN(cudaFree(d_finished));
-	CUDA_CHECK_RETURN(cudaDeviceReset());
-	return 0;
+    CUDA_CHECK_RETURN(cudaDeviceReset());
+    return 0;
 }
