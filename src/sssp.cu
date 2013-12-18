@@ -56,6 +56,11 @@ DijkstraKernel2(int* g_graph_nodes, int* g_graph_edges,short int* g_graph_weight
         exit(1);                                                      \
     } }
 
+void copyToDevice(void *h_mem, void **d_mem, size_t size) {
+  CUDA_CHECK_RETURN( cudaMalloc( d_mem, size) );
+  CUDA_CHECK_RETURN( cudaMemcpy( *d_mem, h_mem, size, cudaMemcpyHostToDevice) );
+}
+
 int main( int argc, char** argv) {
 
     printf("Reading File\n");
@@ -91,8 +96,7 @@ int main( int argc, char** argv) {
     int no=0;
     for( unsigned int i = 0; i < no_of_nodes; i++) {
       fscanf(fp,"%d %d",&start,&edgeno);
-      if(edgeno>100)
-    no++;
+      if(edgeno>100) no++;
       h_graph_nodes[i] = start;
       h_graph_updating_cost[i] = MAX_COST;
       h_graph_mask[i]=false;
@@ -124,22 +128,18 @@ int main( int argc, char** argv) {
 
     //Copy the int list to device memory
     int* d_graph_nodes;
-    CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_graph_nodes, sizeof(int)*no_of_nodes) );
-    CUDA_CHECK_RETURN( cudaMemcpy( d_graph_nodes, h_graph_nodes, sizeof(int)*no_of_nodes, cudaMemcpyHostToDevice) );
+    copyToDevice( h_graph_nodes, (void**)&d_graph_nodes, sizeof(int)*no_of_nodes );
 
     //Copy the Edge List to device Memory
     int* d_graph_edges;
-    CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_graph_edges, sizeof(int)*edge_list_size) );
-    CUDA_CHECK_RETURN( cudaMemcpy( d_graph_edges, h_graph_edges, sizeof(int)*edge_list_size, cudaMemcpyHostToDevice) );
+    copyToDevice( h_graph_edges, (void**)&d_graph_edges, sizeof(int)*edge_list_size );
 
     short int* d_graph_weights;
-    CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_graph_weights, sizeof(short int)*edge_list_size) );
-    CUDA_CHECK_RETURN( cudaMemcpy( d_graph_weights, h_graph_weights, sizeof(short int)*edge_list_size, cudaMemcpyHostToDevice) );
+    copyToDevice( h_graph_weights, (void**)&d_graph_weights, sizeof(short int)*edge_list_size );
 
     //Copy the Mask to device memory
     bool* d_graph_mask;
-    CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_graph_mask, sizeof(bool)*no_of_nodes) );
-    CUDA_CHECK_RETURN( cudaMemcpy( d_graph_mask, h_graph_mask, sizeof(bool)*no_of_nodes, cudaMemcpyHostToDevice) );
+    copyToDevice( h_graph_mask, (void**)&d_graph_mask, sizeof(bool)*no_of_nodes );
 
     // allocate mem for the result on host side
     int* h_cost = (int*) malloc( sizeof(int)*no_of_nodes);
@@ -148,12 +148,10 @@ int main( int argc, char** argv) {
 
     // allocate device memory for result
     int* d_cost;
-    CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_cost, sizeof(int)*no_of_nodes));
-    CUDA_CHECK_RETURN( cudaMemcpy( d_cost, h_cost, sizeof(int)*no_of_nodes, cudaMemcpyHostToDevice) );
+    copyToDevice( h_cost, (void**)&d_cost, sizeof(int)*no_of_nodes );
 
     int* d_graph_updating_cost;
-    CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_graph_updating_cost, sizeof(int)*no_of_nodes));
-    CUDA_CHECK_RETURN( cudaMemcpy( d_graph_updating_cost, h_graph_updating_cost, sizeof(int)*no_of_nodes, cudaMemcpyHostToDevice) );
+    copyToDevice( h_graph_updating_cost, (void**)&d_graph_updating_cost, sizeof(int)*no_of_nodes );
 
     //make a bool to check if the execution is over
     bool *d_finished;
