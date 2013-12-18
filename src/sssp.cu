@@ -20,14 +20,14 @@ typedef unsigned long  uint64;
 #define MAX_THREADS_PER_BLOCK 512
 
 __global__ void
-DijkstraKernel1(int* g_graph_nodes,
-		int* g_graph_edges,
-		int* g_graph_weights,
-		int* g_up_cost,
-		bool* g_graph_mask,
-		int* g_cost,
-		int no_of_nodes,
-		int no_of_edges) {
+DijkstraKernel1(uint32  no_of_nodes,
+		uint32  no_of_edges,
+		uint32 *g_graph_nodes,
+		uint32 *g_graph_edges,
+		uint32 *g_graph_weights,
+		uint32 *g_up_cost,
+		bool   *g_graph_mask,
+		uint32 *g_cost) {
   int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
   int i,end,id;
   if(tid<no_of_nodes && g_graph_mask[tid]) {
@@ -41,15 +41,11 @@ DijkstraKernel1(int* g_graph_nodes,
 }
 
 __global__ void
-DijkstraKernel2(int* g_graph_nodes,
-		int* g_graph_edges,
-		int* g_graph_weights, 
-		int* g_up_cost,
-		bool* g_graph_mask, 
-		int* g_cost,
-		bool *d_finished,
-		int no_of_nodes,
-		int no_of_edges) {
+DijkstraKernel2(uint32  no_of_nodes,
+		uint32 *g_up_cost,
+		bool   *g_graph_mask, 
+		uint32 *g_cost,
+		bool   *d_finished) {
   int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
   if(tid<no_of_nodes && g_cost[tid] > g_up_cost[tid]) {
     g_cost[tid] = g_up_cost[tid];
@@ -76,9 +72,9 @@ void copyToDevice(void *h_mem, void **d_mem, size_t size) {
   CUDA_CHECK_RETURN( cudaMemcpy( *d_mem, h_mem, size, cudaMemcpyHostToDevice) );
 }
 
-int main( int argc, char** argv) {
+int32 main( int32 argc, char** argv) {
 
-  const int32 MAX_COST = 1 << 30;
+  const uint32 MAX_COST = 1 << 30;
 
   uint32 no_of_nodes = 0;
   uint32 no_of_edges = 0;
@@ -106,11 +102,11 @@ int main( int argc, char** argv) {
   }
 
   // allocate host memory
-  int* h_graph_nodes = (int*) malloc(sizeof(int)*no_of_nodes);
+  uint32* h_graph_nodes = (uint32*) malloc(sizeof(uint32)*no_of_nodes);
   bool *h_graph_mask = (bool*) malloc(sizeof(bool)*no_of_nodes);
-  int *h_up_cost = (int*) malloc(sizeof(int)*no_of_nodes);
+  uint32 *h_up_cost = (uint32*) malloc(sizeof(uint32)*no_of_nodes);
 
-  int start, edgeno;
+  uint32 start, edgeno;
   // initalize the memory
   for( uint32 i = 0; i < no_of_nodes; i++ ) {
     fscanf(fp,"%d %d",&start,&edgeno);
@@ -129,10 +125,10 @@ int main( int argc, char** argv) {
   fscanf(fp,"%d",&no_of_edges);
   printf("No of Edges: %d\n", no_of_edges);
 
-  int id;
-  int* h_graph_edges = (int*) malloc(sizeof(int)*no_of_edges);
-  int* h_graph_weights = (int*) malloc(sizeof(int)*no_of_edges);
-  for(int i=0; i < no_of_edges ; i++) {
+  uint32 id;
+  uint32* h_graph_edges = (uint32*) malloc(sizeof(uint32)*no_of_edges);
+  uint32* h_graph_weights = (uint32*) malloc(sizeof(uint32)*no_of_edges);
+  for(uint32 i=0; i < no_of_edges ; i++) {
     fscanf(fp,"%d",&id);
     h_graph_edges[i] = id;
     fscanf(fp,"%d",&id);
@@ -145,19 +141,19 @@ int main( int argc, char** argv) {
   printf("Avg Branching Factor: %f\n",no_of_edges/(float)no_of_nodes);
 
   // allocate mem for the result on host side
-  int* h_cost = (int*) malloc( sizeof(int)*no_of_nodes);
-  for(int i=0;i<no_of_nodes;i++) h_cost[i]= MAX_COST;
+  uint32* h_cost = (uint32*) malloc( sizeof(uint32)*no_of_nodes);
+  for(uint32 i=0;i<no_of_nodes;i++) h_cost[i]= MAX_COST;
   h_cost[source]=0;
 
-  int32 *d_cost, *d_up_cost, *d_graph_nodes, *d_graph_edges, *d_graph_weights;
+  uint32 *d_cost, *d_up_cost, *d_graph_nodes, *d_graph_edges, *d_graph_weights;
   bool *d_graph_mask;
 
   // Copy lists to device memory
-  copyToDevice( h_up_cost,       (void**)&d_up_cost,       sizeof(int32)*no_of_nodes );
-  copyToDevice( h_cost,          (void**)&d_cost,          sizeof(int32)*no_of_nodes );
-  copyToDevice( h_graph_nodes,   (void**)&d_graph_nodes,   sizeof(int32)*no_of_nodes );
-  copyToDevice( h_graph_edges,   (void**)&d_graph_edges,   sizeof(int32)*no_of_edges );
-  copyToDevice( h_graph_weights, (void**)&d_graph_weights, sizeof(int32)*no_of_edges );
+  copyToDevice( h_up_cost,       (void**)&d_up_cost,       sizeof(uint32)*no_of_nodes );
+  copyToDevice( h_cost,          (void**)&d_cost,          sizeof(uint32)*no_of_nodes );
+  copyToDevice( h_graph_nodes,   (void**)&d_graph_nodes,   sizeof(uint32)*no_of_nodes );
+  copyToDevice( h_graph_edges,   (void**)&d_graph_edges,   sizeof(uint32)*no_of_edges );
+  copyToDevice( h_graph_weights, (void**)&d_graph_weights, sizeof(uint32)*no_of_edges );
   copyToDevice( h_graph_mask,	 (void**)&d_graph_mask,    sizeof(bool)*no_of_nodes );
 
   //make a bool to check if the execution is over
@@ -168,15 +164,24 @@ int main( int argc, char** argv) {
   dim3  grid( num_of_blocks, 1, 1);
   dim3  threads( num_of_threads_per_block, 1, 1);
 
-  int k=0;
+  uint32 k=0;
   do {
-    DijkstraKernel1<<< grid, threads, 0 >>>( d_graph_nodes, d_graph_edges, d_graph_weights, d_up_cost,
-					     d_graph_mask, d_cost, no_of_nodes, no_of_edges );
+    DijkstraKernel1<<< grid, threads, 0 >>>( no_of_nodes,
+					     no_of_edges,
+					     d_graph_nodes,
+					     d_graph_edges,
+					     d_graph_weights,
+					     d_up_cost,
+					     d_graph_mask,
+					     d_cost );
     k++;
     finished = false;
     CUDA_CHECK_RETURN( cudaMemcpy( d_finished, &finished, sizeof(bool), cudaMemcpyHostToDevice ) );
-    DijkstraKernel2<<< grid, threads, 0 >>>( d_graph_nodes, d_graph_edges, d_graph_weights, d_up_cost,
-					     d_graph_mask, d_cost, d_finished, no_of_nodes, no_of_edges );
+    DijkstraKernel2<<< grid, threads, 0 >>>( no_of_nodes,
+					     d_up_cost,
+					     d_graph_mask,
+					     d_cost,
+					     d_finished);
     CUDA_CHECK_RETURN( cudaThreadSynchronize() );    // Wait for the GPU launched work to complete
     CUDA_CHECK_RETURN( cudaGetLastError() );
     CUDA_CHECK_RETURN( cudaMemcpy( &finished, d_finished, sizeof(bool), cudaMemcpyDeviceToHost ) );
@@ -189,7 +194,7 @@ int main( int argc, char** argv) {
 
   //Store the result into a file
   FILE *fpo = fopen("result.txt","w");
-  for(int i=0;i<no_of_nodes;i++)
+  for(uint32 i=0;i<no_of_nodes;i++)
     fprintf(fpo,"%d) cost:%d\n",i,h_cost[i]);
   fclose(fpo);
   printf("Result stored in result.txt\n");
