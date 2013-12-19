@@ -4,30 +4,21 @@
 struct QblckComparer
   : public btree::btree_key_compare_to_tag {
   int operator()(const qblck &l, const qblck &r) const {
-    level ll = LEVEL_OF_QBLCK(l);
-    level rl = LEVEL_OF_QBLCK(r);
-    zcode lz = CODE_OF_QBLCK(l);
-    zcode rz = CODE_OF_QBLCK(r);
-    // zcode diff = 0;
-    if( ll == rl ) {
-      // diff = lz - rz;
-    } else if( ll < rl ) { // demote r and compare
-      zcode oz = CODE_OF_QBLCK(QBLCK(ll, rz));
-      // diff = lz - oz;
-      rz = oz;
-    } else { // demote l and compare
-      zcode oz = CODE_OF_QBLCK(QBLCK(rl, lz));
-      //diff = oz - rz;
-      lz = oz;
-    }
-    // return (0 < diff) - (diff < 0);
-    return (lz < rz) ? -1 : ((lz > rz) ? 1 : 0);
+    return cmp_qblck(l, r);
   }
 };
 
 typedef btree::btree_map<qblck, Qvtx*, QblckComparer> Qmap;
 
 Qmap *qmap;
+
+Qmap::iterator *it;
+
+void qtree_iterator::increment() { it->increment(); }
+
+qblck qtree_iterator::qblock() { return it->key(); }
+
+Qvtx* qtree_iterator::qvtx() { return (*it)->second; }
 
 Qt::Qt() {
   qmap = new Qmap;
@@ -38,7 +29,8 @@ Qt::~Qt() {
 }
 
 bool Qt::contains(qblck b) {
-  return false;
+  Qmap::iterator lookup = qmap->find(b);
+  return lookup == qmap->end();
 }
 
 void Qt::insert(Qvtx *v) {
@@ -80,15 +72,35 @@ uint64 Qt::size() {
   return qmap->size();
 }
 
-
-
-Qvtx* Qt::getRep(qblck b) {
-  pair<uint64, uint64> cxy = mo
-  uint64 dir = rand() % 4;
-  return NULL;
+uint64 crowdist2(latlon a, latlon b) {
+  uint64 xd = std::max(a.first, b.first) - std::min(a.first, b.first);
+  uint64 yd = std::max(a.second, b.second) - std::min(a.second, b.second);
+  return xd*xd + yd*yd;
 }
 
-#if 0
+Qvtx* Qt::getRep(qblck b) {
+  Qmap::iterator lookup = qmap->find(b);
+  if(lookup == qmap->end()) { // no block
+    return NULL;
+  }
+  // Return closest
+  latlon cxy = morton_uncode(CODE_OF_QBLCK(child11(b)));
+  Qvtx *minvtx = lookup->second;
+  uint64 mindst = crowdist2(morton_uncode(minvtx->z), cxy);
+  uint64 dst;
+  while(++lookup != qmap->end() && cmp_qblck(lookup.key(), b) == 0) {
+    zcode oz = lookup->second->z;
+    latlon oxy = morton_uncode(oz);
+    dst = crowdist2(oxy, cxy);
+    if(dst < mindst) {
+      minvtx = lookup->second;
+      mindst = dst;
+    }
+  }
+  return minvtx;
+}
+
+#if 1
 
 #include <algorithm>
 #include <stdlib.h>
@@ -126,18 +138,21 @@ int main(int argc, char* argv[]) {
   std::ifstream cof("NY.co");
   std::string v;
   int32 id, lat, lon;
-  std::vector<Qvtx> qvtxes;
+  std::vector<Qvtx*> qvtxes;
   qvtxes.reserve(nn);
   Qt qt;
-  for(uint32 i=0; i<nn; i++) {
+  for(uint32 i=0; i<1; i++) {
     cof >> v >> id >> lat >> lon;
-    qvtxes.push_back(Qvtx(i, morton_code(std::abs(lat), lon)));
-    qt.insert(&qvtxes.at(i));
+    qvtxes.push_back(new Qvtx(i, morton_code(std::abs(lat), lon)));
+    qt.insert(qvtxes.at(i));
   }
   cof.close();
 
   printf("all read, qt.size=%lu\n", qt.size());
 
+  qblck r = QBLCK(0, 0);
+  Qvtx *rep = qt.getRep(r);
+  std::cout << rep->vid << std::endl;
 }
 
 #endif

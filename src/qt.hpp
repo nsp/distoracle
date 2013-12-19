@@ -54,9 +54,10 @@ inline uint64 contract(uint64 x) {
   x = ( x | (x >>  4)) & 0x00ff00ff00ff00ff;
   x = ( x | (x >>  8)) & 0x0000ffff0000ffff;
   x = ( x | (x >> 16)) & 0x00000000ffffffff;
+  return x;
 }
 
-inline std::pair<uint64, uint64> morton_uncode(zcode z) {
+inline latlon morton_uncode(zcode z) {
   uint64 x = contract(z);
   uint64 y = contract(z>>1);
   return std::make_pair(x, y);
@@ -88,6 +89,13 @@ struct Qvtx {
   ~Qvtx() {}
 };
 
+//  qblck, Qvtx
+struct qtree_iterator {
+  void increment();
+  qblck qblock();
+  Qvtx* qvtx();
+};
+
 struct Qt {
   Qt();
   ~Qt();
@@ -95,6 +103,29 @@ struct Qt {
   void insert(Qvtx *v);
   uint64 size();
   Qvtx* getRep(qblck b);
+  qtree_iterator block_it(qblck b);
 };
+
+// -1 if l <z r, 1 if r <z l, 0 if one contains the other
+int cmp_qblck(const qblck &l, const qblck &r) {
+  level ll = LEVEL_OF_QBLCK(l);
+  level rl = LEVEL_OF_QBLCK(r);
+  zcode lz = CODE_OF_QBLCK(l);
+  zcode rz = CODE_OF_QBLCK(r);
+  // zcode diff = 0;
+  if( ll == rl ) {
+    // diff = lz - rz;
+  } else if( ll < rl ) { // demote r and compare
+    zcode oz = CODE_OF_QBLCK(QBLCK(ll, rz));
+    // diff = lz - oz;
+    rz = oz;
+  } else { // demote l and compare
+    zcode oz = CODE_OF_QBLCK(QBLCK(rl, lz));
+    //diff = oz - rz;
+    lz = oz;
+  }
+  // return (0 < diff) - (diff < 0);
+  return (lz < rz) ? -1 : ((lz > rz) ? 1 : 0);
+}
 
 #endif // _QT_H_

@@ -10,4 +10,6 @@ typedef unsigned int   uint32;
 typedef long           int64;
 typedef unsigned long  uint64;
 
+typedef std::pair<uint64, uint64> latlon;
+
 #endif
