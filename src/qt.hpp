@@ -104,6 +104,10 @@ struct Qt {
   uint64 size();
   Qvtx* getRep(qblck b);
   qtree_iterator block_it(qblck b);
+  bool isleaf(qblck b);
+  bool isnotleaf(qblck b);
+  void childpairs(qblck b, workq &Q);
+  uint32 netdiam(uint32 *dists, qblck b);
 };
 
 // -1 if l <z r, 1 if r <z l, 0 if one contains the other
@@ -127,5 +131,13 @@ int cmp_qblck(const qblck &l, const qblck &r) {
   // return (0 < diff) - (diff < 0);
   return (lz < rz) ? -1 : ((lz > rz) ? 1 : 0);
 }
+
+struct approx_dist {
+  zcode za;
+  zcode zb;
+  uint64 dg;
+  approx_dist(zcode za, zcode zb, uint32 dg) :
+    za(za), zb(zb), dg(dg) {}
+};
 
 #endif // _QT_H_

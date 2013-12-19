@@ -233,13 +233,13 @@ int32 main( int32 argc, char** argv) {
   string v;
   uint32 lat, lon;
   uint32 max = 1U << 28;
-  vector<Qvtx> qvtxes;
+  vector<Qvtx*> qvtxes;
   qvtxes.reserve(nn);
   Qt qt;
   for(uint32 i=0; i<nn; i++) {
     cof >> v >> id >> lat >> lon;
-    qvtxes.push_back(Qvtx(i, morton_code(max+lat, max+lon)));
-    qt.insert(&qvtxes.at(i));
+    qvtxes.push_back(new Qvtx(i, morton_code(max+lat, max+lon)));
+    qt.insert(qvtxes.at(i));
   }
   cof.close();
 
@@ -247,6 +247,25 @@ int32 main( int32 argc, char** argv) {
 
   /********************************************************************************/
 
+  double eps = 0.5;
+  double sep = 2/eps;
+  vector<approx_dist*> L;
+  vector<std::pair<qblck, qblck>> Q;
+  qblck root = QBLCK(0, 0);
+  for(uint32 dl=0; dl<4; dl++) {
+    qblck cl = child(root, dl);
+    if(qt.contains(cl)) {
+      for(uint32 dr=0; dr<4; dr++) {
+	qblck cr = child(root, dr);
+	if(qt.contains(cr)) {
+	  if((cl != cr) || (cl==cr && qt.isnotleaf(cl))) {
+	    Q.push_back(make_pair(cl, cr));
+	  }
+	}
+      }
+    }
+  }
+  
   for(uint32 i=0; i<0; i++) {
     source_id = rand() % nn;
     printf("source = %d\n", source_id);

@@ -1,6 +1,7 @@
 #include "qt.hpp"
 #include "btree_map.h"
 
+
 struct QblckComparer
   : public btree::btree_key_compare_to_tag {
   int operator()(const qblck &l, const qblck &r) const {
@@ -72,6 +73,18 @@ uint64 Qt::size() {
   return qmap->size();
 }
 
+bool Qt::isleaf(qblck b) {
+  Qmap::iterator lookup = qmap->find(b);
+  if(lookup == qmap->end()) {
+    return false;
+  }
+  return lookup.key() == b;
+}
+
+bool Qt::isnotleaf(qblck b) {
+  return !isleaf(b);
+}
+
 uint64 crowdist2(latlon a, latlon b) {
   uint64 xd = std::max(a.first, b.first) - std::min(a.first, b.first);
   uint64 yd = std::max(a.second, b.second) - std::min(a.second, b.second);
@@ -98,6 +111,35 @@ Qvtx* Qt::getRep(qblck b) {
     }
   }
   return minvtx;
+}
+
+void Qt::childpairs(qblck b, workq &Q) {
+    for(uint32 dl=0; dl<4; dl++) {
+    qblck cl = child(b, dl);
+    if(contains(cl)) {
+      for(uint32 dr=0; dr<4; dr++) {
+	qblck cr = child(b, dr);
+	if(contains(cr)) {
+	  if((cl != cr) || (cl==cr && isnotleaf(cl))) {
+	    Q.push_back(std::make_pair(cl, cr));
+	  }
+	}
+      }
+    }
+  }
+}
+
+uint32 Qt::netdiam(uint32 *dists, qblck b) {
+  uint32 maxdst = 0, dst;
+  Qmap::iterator lookup = qmap->find(b);
+  while(lookup != qmap->end() && cmp_qblck(lookup.key(), b) == 0) {
+    dst = dists[lookup->second->vid];
+    if(dst >= maxdst) {
+      maxdst = dst;
+    }
+    lookup++;
+  }
+  return maxdst;
 }
 
 #if 1
@@ -141,7 +183,7 @@ int main(int argc, char* argv[]) {
   std::vector<Qvtx*> qvtxes;
   qvtxes.reserve(nn);
   Qt qt;
-  for(uint32 i=0; i<1; i++) {
+  for(uint32 i=0; i<4; i++) {
     cof >> v >> id >> lat >> lon;
     qvtxes.push_back(new Qvtx(i, morton_code(std::abs(lat), lon)));
     qt.insert(qvtxes.at(i));
@@ -150,6 +192,68 @@ int main(int argc, char* argv[]) {
 
   printf("all read, qt.size=%lu\n", qt.size());
 
+  uint32 *h_costs = (uint32*)malloc(nn*sizeof(uint32));
+  double eps = 0.5;
+  double sep = 2/eps;
+  std::vector<approx_dist*> L;
+  std::deque<std::pair<qblck, qblck>> Q;
+  qblck root = QBLCK(0, 0);
+  qt.childpairs(root, Q);
+  while(!Q.empty()) {
+    qblck a = Q.front().first;
+    qblck b = Q.front().second;
+    Q.pop_front();
+    if(a==b && qt.isnotleaf(a)) {
+      qt.childpairs(a, Q);
+    } else {
+      // Choose rep point of A
+      Qvtx *pa = qt.getRep(a);
+      // Get sssp from pa
+      // sssp(dps, nn, h_graph_nodes, h_up_cost, h_mask, ne, h_graph_edges, h_graph_weights, pa->vid, h_cost)
+      // Measure diameter of A
+      uint32 da = qt.netdiam(h_costs, a);
+      // dg = graph_dist(pa, pb)
+      // Choose rep point of B
+      Qvtx *pb = qt.getRep(b);
+      uint32 dg_a_b = h_costs[pb->vid];
+      // Get sssp from pb
+      // sssp(dps, nn, h_graph_nodes, h_up_cost, h_mask, ne, h_graph_edges, h_graph_weights, pb->vid, h_cost)
+      // Measure diameter of B
+      uint32 db = qt.netdiam(h_costs, b);
+      // r = max(da, db)
+      uint32 r = std::max(da, db);
+      // if dg/r >= sep
+      if( dg_a_b/(double)r >= sep ) {
+	L.push_back(new approx_dist(CODE_OF_QBLCK(a), CODE_OF_QBLCK(b), dg_a_b));
+      } else {
+	std::vector<qblck> la, lb;
+	if(qt.isnotleaf(a)) {
+	  for(uint64 cn=0; cn<4; cn++) {
+	    if(qt.contains(cn)) {
+	      la.push_back(child(a, cn));
+	    } else {
+	      la.push_back(a);
+	    }
+	  }
+	}
+	if(qt.isnotleaf(b)) {
+	  for(uint64 cn=0; cn<4; cn++) {
+	    if(qt.contains(cn)) {
+	      la.push_back(child(b, cn));
+	    } else {
+	      la.push_back(b);
+	    }
+	  }
+	}
+	for(std::vector<qblck>::iterator ca = la.begin(); ca != la.end(); ca++) {
+	  for(std::vector<qblck>::iterator cb = lb.begin(); cb != lb.end(); cb++) {
+	    Q.push_back(std::make_pair(*ca, *cb));
+	  }
+	}
+      }
+    }
+  }
+  
   qblck r = QBLCK(0, 0);
   Qvtx *rep = qt.getRep(r);
   std::cout << rep->vid << std::endl;
