@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,28 +7,22 @@
 #include <iostream>
 #include <vector>
 
-using namespace std;
+#include "types.h"
+#include "qt.hpp"
 
-typedef char           int8;
-typedef unsigned char  uint8;
-typedef short          int16;
-typedef unsigned short uint16;
-typedef int            int32;
-typedef unsigned int   uint32;
-typedef long           int64;
-typedef unsigned long  uint64;
+using namespace std;
 
 #define MAX_THREADS_PER_BLOCK 512
 
 __global__ void
 DijkstraKernel1(uint32  no_of_nodes,
-		uint32  no_of_edges,
-		uint32 *g_graph_nodes,
-		uint32 *g_graph_edges,
-		uint32 *g_graph_weights,
-		uint32 *g_up_cost,
-		bool   *g_graph_mask,
-		uint32 *g_cost) {
+                uint32  no_of_edges,
+                uint32 *g_graph_nodes,
+                uint32 *g_graph_edges,
+                uint32 *g_graph_weights,
+                uint32 *g_up_cost,
+                bool   *g_graph_mask,
+                uint32 *g_cost) {
   int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
   int i,end,id;
   if(tid<no_of_nodes && g_graph_mask[tid]) {
@@ -42,10 +37,10 @@ DijkstraKernel1(uint32  no_of_nodes,
 
 __global__ void
 DijkstraKernel2(uint32  no_of_nodes,
-		uint32 *g_up_cost,
-		bool   *g_graph_mask, 
-		uint32 *g_cost,
-		bool   *d_finished) {
+                uint32 *g_up_cost,
+                bool   *g_graph_mask,
+                uint32 *g_cost,
+                bool   *d_finished) {
   int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
   if(tid<no_of_nodes && g_cost[tid] > g_up_cost[tid]) {
     g_cost[tid] = g_up_cost[tid];
@@ -67,46 +62,58 @@ DijkstraKernel2(uint32  no_of_nodes,
         exit(1);                                                      \
     } }
 
-void copyToDevice(const void *h_mem, void **d_mem, size_t size) {
-  CUDA_CHECK_RETURN( cudaMalloc( d_mem, size) );
-  CUDA_CHECK_RETURN( cudaMemcpy( *d_mem, h_mem, size, cudaMemcpyHostToDevice) );
+struct device_ptrs {
+  uint32 *up_cost;
+  uint32 *cost;
+  uint32 *nodes;
+  uint32 *edges;
+  uint32 *evals;
+  bool   *mask;
+  bool   *finished;
+};
+
+void graph_to_dev(device_ptrs dps,
+                  uint32 nn, uint32 *nodes,
+                  uint32 ne, uint32 *edges, uint32 *evals) {
+  CUDA_CHECK_RETURN( cudaMemcpy( dps.nodes, nodes, 4*nn, cudaMemcpyHostToDevice) );
+  CUDA_CHECK_RETURN( cudaMemcpy( dps.edges, edges, 4*ne, cudaMemcpyHostToDevice) );
+  CUDA_CHECK_RETURN( cudaMemcpy( dps.evals, evals, 4*ne, cudaMemcpyHostToDevice) );
 }
 
-void sssp( const uint32 no_of_nodes,
-	   const uint32 *h_graph_nodes,
-	   const uint32 no_of_edges,
-	   const uint32 *h_graph_edges,
-	   const uint32 *h_graph_weights,
-	   const uint32 source_id,
-	   uint32 *h_cost) {
+void prob_to_dev(device_ptrs dps,
+                 uint32 nn, uint32 *up_cost, uint32 *cost, bool *mask) {
+  CUDA_CHECK_RETURN( cudaMemcpy( dps.up_cost, up_cost, 4*nn, cudaMemcpyHostToDevice) );
+  CUDA_CHECK_RETURN( cudaMemcpy( dps.cost,    cost,    4*nn, cudaMemcpyHostToDevice) );
+  CUDA_CHECK_RETURN( cudaMemcpy( dps.mask,    mask,    sizeof(bool)*nn, cudaMemcpyHostToDevice) );
+}
+
+void sssp( device_ptrs dps,
+           const uint32 no_of_nodes,
+           const uint32 *h_graph_nodes,
+                 uint32 *h_up_cost,
+                 bool   *h_mask,
+           const uint32 no_of_edges,
+           const uint32 *h_graph_edges,
+           const uint32 *h_graph_weights,
+           const uint32 source_id,
+           uint32 *h_cost) {
 
   const uint32 MAX_COST = 1 << 30;
 
-  uint32 *h_up_cost     = (uint32*) malloc(sizeof(uint32)*no_of_nodes);
-  bool   *h_graph_mask  = (bool*)   malloc(sizeof(bool)*no_of_nodes);
   for( uint32 i=0; i<no_of_nodes; i++) {
-    h_up_cost[i]    = MAX_COST;
-    h_cost[i]       = MAX_COST;
-    h_graph_mask[i] = false;
+    h_up_cost[i] = MAX_COST;
+    h_cost[i]    = MAX_COST;
+    h_mask[i]    = false;
   }
 
-  h_cost[source_id]=0;
-  h_graph_mask[source_id] = true;
-
-  uint32 *d_cost, *d_up_cost, *d_graph_nodes, *d_graph_edges, *d_graph_weights;
-  bool *d_graph_mask;
+  h_cost[source_id] = 0;
+  h_mask[source_id] = true;
 
   // Copy lists to device memory
-  copyToDevice( h_up_cost,       (void**)&d_up_cost,       sizeof(uint32)*no_of_nodes );
-  copyToDevice( h_cost,          (void**)&d_cost,          sizeof(uint32)*no_of_nodes );
-  copyToDevice( h_graph_nodes,   (void**)&d_graph_nodes,   sizeof(uint32)*no_of_nodes );
-  copyToDevice( h_graph_edges,   (void**)&d_graph_edges,   sizeof(uint32)*no_of_edges );
-  copyToDevice( h_graph_weights, (void**)&d_graph_weights, sizeof(uint32)*no_of_edges );
-  copyToDevice( h_graph_mask,	 (void**)&d_graph_mask,    sizeof(bool)*no_of_nodes );
+  prob_to_dev(dps, no_of_nodes, h_up_cost, h_cost, h_mask);
 
   //make a bool to check if the execution is over
-  bool finished, *d_finished;
-  CUDA_CHECK_RETURN( cudaMalloc( (void**) &d_finished, sizeof(bool)));
+  bool finished;
 
   // setup execution parameters
   // Make execution Parameters according to the number of nodes
@@ -123,45 +130,36 @@ void sssp( const uint32 no_of_nodes,
   uint32 k=0;
   do {
     DijkstraKernel1<<< grid, threads, 0 >>>( no_of_nodes,
-					     no_of_edges,
-					     d_graph_nodes,
-					     d_graph_edges,
-					     d_graph_weights,
-					     d_up_cost,
-					     d_graph_mask,
-					     d_cost );
+                                             no_of_edges,
+                                             dps.nodes,
+                                             dps.edges,
+                                             dps.evals,
+                                             dps.up_cost,
+                                             dps.mask,
+                                             dps.cost );
     k++;
     finished = false;
-    CUDA_CHECK_RETURN( cudaMemcpy( d_finished, &finished, sizeof(bool), cudaMemcpyHostToDevice ) );
+    CUDA_CHECK_RETURN( cudaMemcpy( dps.finished, &finished, sizeof(bool), cudaMemcpyHostToDevice ) );
     DijkstraKernel2<<< grid, threads, 0 >>>( no_of_nodes,
-					     d_up_cost,
-					     d_graph_mask,
-					     d_cost,
-					     d_finished);
+                                             dps.up_cost,
+                                             dps.mask,
+                                             dps.cost,
+                                             dps.finished);
     CUDA_CHECK_RETURN( cudaThreadSynchronize() );    // Wait for the GPU launched work to complete
     CUDA_CHECK_RETURN( cudaGetLastError() );
-    CUDA_CHECK_RETURN( cudaMemcpy( &finished, d_finished, sizeof(bool), cudaMemcpyDeviceToHost ) );
+    CUDA_CHECK_RETURN( cudaMemcpy( &finished, dps.finished, sizeof(bool), cudaMemcpyDeviceToHost ) );
   } while( finished );
 
   // copy result from device to host
-  CUDA_CHECK_RETURN( cudaMemcpy( h_cost, d_cost, sizeof(int)*no_of_nodes, cudaMemcpyDeviceToHost) );
+  CUDA_CHECK_RETURN( cudaMemcpy( h_cost, dps.cost, sizeof(int)*no_of_nodes, cudaMemcpyDeviceToHost) );
 
-  free(h_graph_mask);
-  free(h_up_cost);
-  CUDA_CHECK_RETURN(cudaFree(d_graph_nodes));
-  CUDA_CHECK_RETURN(cudaFree(d_graph_edges));
-  CUDA_CHECK_RETURN(cudaFree(d_graph_mask));
-  CUDA_CHECK_RETURN(cudaFree(d_graph_weights));
-  CUDA_CHECK_RETURN(cudaFree(d_up_cost));
-  CUDA_CHECK_RETURN(cudaFree(d_cost));
-  CUDA_CHECK_RETURN(cudaFree(d_finished));
 }
 
 int32 main( int32 argc, char** argv) {
 
-  uint32 no_of_nodes = 0;
-  uint32 no_of_edges = 0;
-  
+  uint32 nn = 0;
+  uint32 ne = 0;
+
   printf("Reading File\n");
   // Read in Graph from a file
   FILE *fp = fopen("NY.out","r");
@@ -172,15 +170,19 @@ int32 main( int32 argc, char** argv) {
 
   int32 source_id = 0;
 
-  fscanf(fp,"%d",&no_of_nodes);
-  printf("No of Nodes: %d\n",no_of_nodes);
+  fscanf(fp,"%d",&nn);
+  printf("No of Nodes: %d\n",nn);
 
   // allocate host memory
-  uint32 *h_graph_nodes = (uint32*) malloc(sizeof(uint32)*no_of_nodes);
+  uint32 *h_graph_nodes, *h_up_cost;
+  bool   *h_mask;
+  CUDA_CHECK_RETURN( cudaMallocHost( &h_graph_nodes, sizeof(uint32)*nn ) );
+  CUDA_CHECK_RETURN( cudaMallocHost( &h_up_cost,     sizeof(uint32)*nn ) );
+  CUDA_CHECK_RETURN( cudaMallocHost( &h_mask,        sizeof(bool)*nn ) );
 
   // initalize the memory
   uint32 start, edgeno;
-  for( uint32 i = 0; i < no_of_nodes; i++ ) {
+  for( uint32 i = 0; i < nn; i++ ) {
     fscanf(fp,"%d %d",&start,&edgeno);
     h_graph_nodes[i] = start;
   }
@@ -189,13 +191,14 @@ int32 main( int32 argc, char** argv) {
   fscanf(fp,"%d",&source_id);
   printf("Source vid: %d\n", source_id);
 
-  fscanf(fp,"%d",&no_of_edges);
-  printf("No of Edges: %d\n", no_of_edges);
+  fscanf(fp,"%d",&ne);
+  printf("No of Edges: %d\n", ne);
 
   uint32 id;
-  uint32* h_graph_edges = (uint32*) malloc(sizeof(uint32)*no_of_edges);
-  uint32* h_graph_weights = (uint32*) malloc(sizeof(uint32)*no_of_edges);
-  for(uint32 i=0; i < no_of_edges ; i++) {
+  uint32* h_graph_edges, *h_graph_weights;
+  CUDA_CHECK_RETURN( cudaMallocHost( &h_graph_edges, sizeof(uint32)*ne ) );
+  CUDA_CHECK_RETURN( cudaMallocHost( &h_graph_weights, sizeof(uint32)*ne ) );
+  for(uint32 i=0; i < ne ; i++) {
     fscanf(fp,"%d",&id);
     h_graph_edges[i] = id;
     fscanf(fp,"%d",&id);
@@ -205,32 +208,80 @@ int32 main( int32 argc, char** argv) {
   if(fp) fclose(fp);
 
   printf("Read File\n");
-  printf("Avg Branching Factor: %f\n",no_of_edges/(float)no_of_nodes);
+  printf("Avg Branching Factor: %f\n",ne/(float)nn);
 
   // allocate mem for the result on host side
-  uint32* h_cost = (uint32*) malloc( sizeof(uint32)*no_of_nodes);
+  uint32 *h_cost;
+  CUDA_CHECK_RETURN( cudaMallocHost( &h_cost, sizeof(uint32)*nn ) );
 
-  for(source_id=0; source_id<no_of_nodes; source_id++) {
-    sssp( no_of_nodes, h_graph_nodes,
-	  no_of_edges, h_graph_edges, h_graph_weights,
-	  source_id,
-	  h_cost );
+  // allocate everything in device
+  device_ptrs dps;
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.up_cost, 4*nn ) );
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.cost,    4*nn ) );
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.nodes,   4*nn ) );
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.edges,   4*ne ) );
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.evals,   4*ne ) );
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.mask,    sizeof(bool)*nn ) );
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.finished,sizeof(bool)));
+  graph_to_dev( dps,
+                nn, h_graph_nodes,
+                ne, h_graph_edges, h_graph_weights);
+
+  /********************************************************************************/
+
+  ifstream cof("NY.co");
+  string v;
+  uint32 lat, lon;
+  uint32 max = 1U << 28;
+  vector<Qvtx> qvtxes;
+  qvtxes.reserve(nn);
+  Qt qt;
+  for(uint32 i=0; i<nn; i++) {
+    cof >> v >> id >> lat >> lon;
+    qvtxes.push_back(Qvtx(i, morton_code(max+lat, max+lon)));
+    qt.insert(&qvtxes.at(i));
   }
+  cof.close();
+
+  printf("all read, first=%lu, qt.size=%lu\n", qvtxes[0].z, qt.size());
+
+  /********************************************************************************/
+
+  for(uint32 i=0; i<0; i++) {
+    source_id = rand() % nn;
+    printf("source = %d\n", source_id);
+    sssp( dps,
+          nn, h_graph_nodes, h_up_cost, h_mask,
+          ne, h_graph_edges, h_graph_weights,
+          source_id,
+          h_cost );
+  }
+
+  /********************************************************************************/
 
   printf("Computation finished\n");
 
   //Store the result into a file
   FILE *fpo = fopen("result.txt","w");
-  for(uint32 i=0;i<no_of_nodes;i++)
+  for(uint32 i=0;i<nn;i++)
     fprintf(fpo,"%d) cost:%d\n",i,h_cost[i]);
   fclose(fpo);
   printf("Result stored in result.txt\n");
 
-  // cleanup memory
-  free(h_graph_nodes);
-  free(h_graph_edges);
-  free(h_graph_weights);
-  free(h_cost);
+  // cleanup memory  
+  CUDA_CHECK_RETURN(cudaFreeHost(h_graph_nodes));
+  CUDA_CHECK_RETURN(cudaFreeHost(h_graph_edges));
+  CUDA_CHECK_RETURN(cudaFreeHost(h_graph_weights));
+  CUDA_CHECK_RETURN(cudaFreeHost(h_mask));
+  CUDA_CHECK_RETURN(cudaFreeHost(h_up_cost));
+  CUDA_CHECK_RETURN(cudaFreeHost(h_cost));
+  CUDA_CHECK_RETURN(cudaFree(dps.nodes));
+  CUDA_CHECK_RETURN(cudaFree(dps.edges));
+  CUDA_CHECK_RETURN(cudaFree(dps.mask));
+  CUDA_CHECK_RETURN(cudaFree(dps.evals));
+  CUDA_CHECK_RETURN(cudaFree(dps.up_cost));
+  CUDA_CHECK_RETURN(cudaFree(dps.cost));
+  CUDA_CHECK_RETURN(cudaFree(dps.finished));
   CUDA_CHECK_RETURN(cudaDeviceReset());
   return 0;
 }
