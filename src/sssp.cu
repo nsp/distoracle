@@ -155,17 +155,26 @@ void sssp( device_ptrs dps,
 
 }
 
-void childpairs(const Qt &qt, const qblck b, workq &Q) {
-    for(uint32 dl=0; dl<4; dl++) {
-    qblck cl = child(b, dl);
-    if(qt.contains(cl)) {
-      for(uint32 dr=0; dr<4; dr++) {
-	qblck cr = child(b, dr);
-	if(qt.contains(cr)) {
-	  if((cl != cr) || (cl==cr && qt.isnotleaf(cl))) {
-	    Q.push_back(std::make_pair(cl, cr));
-	  }
-	}
+void decompose(Qt &qt, const qblck b, vector<qblck> l) {
+  if(qt.isleaf(b)) {
+    l.push_back(b);
+  } else {
+    for(uint64 d=0; d<4; d++) {
+      qblck c = child(b, d);
+      if(qt.contains(c)) { l.push_back(c); }
+    }
+  }
+}
+
+void process_allpairs(const Qt &qt, const vector<qblck> as, const vector<qblck> bs, workq &Q) {
+  if(as.size() == 1 && bs.size() == 1) {
+    cout << " allpair(leaves)" << endl;
+    return;
+  }
+  for(vector<qblck>::const_iterator a = as.begin(); a != as.end(); a++) {
+    for(vector<qblck>::const_iterator b = bs.begin(); b != bs.end(); b++) {
+      if(((*a) != (*b)) || (qt.isnotleaf(*a))) {
+	Q.push_back(make_pair(*a, *b));
       }
     }
   }
@@ -269,20 +278,22 @@ int build_oracle() {
   double sep = 2/eps;
   std::deque<std::pair<qblck, qblck> > Q;
   qblck root = QBLCK(0, 0);
-  childpairs(qt, root, Q);
+  Q.push_back(make_pair(root, root));
   uint64 qiters = 0;
   while(!Q.empty()) {
     qblck a = Q.front().first;
     qblck b = Q.front().second;
+    Q.pop_front();
     cout << ++qiters << "/" << Q.size() << ": ";
     cout << "a=" << LEVEL_OF_QBLCK(a) << "|" << hex << CODE_OF_QBLCK(a) << dec << ", ";
     cout << "b=" << LEVEL_OF_QBLCK(b) << "|" << hex << CODE_OF_QBLCK(b) << dec << endl;
     cerr << qiters << endl;
-    Q.pop_front();
     if(a==b) {
       if(qt.isnotleaf(a)) {
 	cout << " Same nonleaf" << endl;
-	childpairs(qt, a, Q);
+	vector<qblck> l;
+	decompose(qt, a, l);
+	process_allpairs(qt, l, l, Q);
       } else {
 	cout << " Same leaf" << endl;
       }
@@ -330,31 +341,9 @@ int build_oracle() {
       } else {
         cout << " ~L" << endl;
         std::vector<qblck> la, lb;
-        if(qt.isnotleaf(a)) {
-          for(uint64 d=0; d<4; d++) {
-	    qblck c = child(a, d);
-            if(qt.contains(c)) {
-              la.push_back(c);
-            }
-	  }
-	} else {
-	  la.push_back(a);
-        }
-        if(qt.isnotleaf(b)) {
-          for(uint64 d=0; d<4; d++) {
-	    qblck c = child(b, d);
-            if(qt.contains(c)) {
-              la.push_back(c);
-            }
-	  }
-	} else {
-	  la.push_back(b);
-        }
-        for(std::vector<qblck>::iterator ca = la.begin(); ca != la.end(); ca++) {
-          for(std::vector<qblck>::iterator cb = lb.begin(); cb != lb.end(); cb++) {
-            Q.push_back(std::make_pair(*ca, *cb));
-          }
-        }
+	decompose(qt, a, la);
+	decompose(qt, b, lb);
+	process_allpairs(qt, la, lb, Q);
       }
     }
   }
