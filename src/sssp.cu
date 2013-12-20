@@ -97,7 +97,7 @@ void sssp( device_ptrs dps,
            const uint32 *h_graph_weights,
            const uint32 source_id,
            uint32 *h_cost) {
-
+  cout << "in sssp..."; cout.flush();
   const uint32 MAX_COST = 1 << 30;
 
   for( uint32 i=0; i<no_of_nodes; i++) {
@@ -127,8 +127,10 @@ void sssp( device_ptrs dps,
   dim3  grid( num_of_blocks, 1, 1);
   dim3  threads( num_of_threads_per_block, 1, 1);
 
+  cout << "running kernels..."; cout.flush();
   uint32 k=0;
   do {
+    cout << "d1..."; cout.flush();
     DijkstraKernel1<<< grid, threads, 0 >>>( no_of_nodes,
                                              no_of_edges,
                                              dps.nodes,
@@ -140,6 +142,7 @@ void sssp( device_ptrs dps,
     k++;
     finished = false;
     CUDA_CHECK_RETURN( cudaMemcpy( dps.finished, &finished, sizeof(bool), cudaMemcpyHostToDevice ) );
+    cout << "d2..."; cout.flush();
     DijkstraKernel2<<< grid, threads, 0 >>>( no_of_nodes,
                                              dps.up_cost,
                                              dps.mask,
@@ -243,38 +246,91 @@ int32 main( int32 argc, char** argv) {
   }
   cof.close();
 
-  printf("all read, first=%lu, qt.size=%lu\n", qvtxes[0].z, qt.size());
+  printf("all read, first=%lu, qt.size=%lu\n", qvtxes[0]->z, qt.size());
 
   /********************************************************************************/
 
   double eps = 0.5;
   double sep = 2/eps;
-  vector<approx_dist*> L;
-  vector<std::pair<qblck, qblck>> Q;
+  std::vector<approx_dist*> L;
+  std::deque<std::pair<qblck, qblck> > Q;
   qblck root = QBLCK(0, 0);
-  for(uint32 dl=0; dl<4; dl++) {
-    qblck cl = child(root, dl);
-    if(qt.contains(cl)) {
-      for(uint32 dr=0; dr<4; dr++) {
-	qblck cr = child(root, dr);
-	if(qt.contains(cr)) {
-	  if((cl != cr) || (cl==cr && qt.isnotleaf(cl))) {
-	    Q.push_back(make_pair(cl, cr));
+  qt.childpairs(root, Q);
+  uint64 qiters = 0;
+  while(!Q.empty()) {
+    qblck a = Q.front().first;
+    qblck b = Q.front().second;
+    cout << ++qiters << ": ";
+    cout << "a=" << LEVEL_OF_QBLCK(a) << "|" << hex << CODE_OF_QBLCK(a) << dec << ", ";
+    cout << "b=" << LEVEL_OF_QBLCK(b) << "|" << hex << CODE_OF_QBLCK(b) << dec << endl;
+    Q.pop_front();
+    if(a==b && qt.isnotleaf(a)) {
+      cout << " Same" << endl;
+      qt.childpairs(a, Q);
+    } else {
+      // Choose rep point of A
+      Qvtx *pa = qt.getRep(a);
+      // Get sssp from pa
+      cout << " sssp(a)..."; cout.flush();;
+      sssp(dps, nn, h_graph_nodes, h_up_cost, h_mask, ne, h_graph_edges, h_graph_weights, pa->vid, h_cost);
+      cout << "done" << endl;
+      // Measure diameter of A
+      uint32 da = qt.netdiam(h_cost, a);
+      // Choose rep point of B
+      Qvtx *pb = qt.getRep(b);
+      // dg = graph_dist(pa, pb)
+      uint32 dg_a_b = h_cost[pb->vid];
+      // Get sssp from pb
+      cout << " sssp(b)..."; cout.flush();;
+      sssp(dps, nn, h_graph_nodes, h_up_cost, h_mask, ne, h_graph_edges, h_graph_weights, pb->vid, h_cost);
+      cout << "done" << endl;
+      // Measure diameter of B
+      uint32 db = qt.netdiam(h_cost, b);
+      // r = max(da, db)
+      uint32 r = std::max(da, db);
+      // if dg/r >= sep
+      if( dg_a_b/(double)r >= sep ) {
+	cout << " L" << endl;
+	L.push_back(new approx_dist(CODE_OF_QBLCK(a), CODE_OF_QBLCK(b), dg_a_b));
+      } else {
+	cout << " ~L" << endl;
+	std::vector<qblck> la, lb;
+	if(qt.isnotleaf(a)) {
+	  for(uint64 cn=0; cn<4; cn++) {
+	    if(qt.contains(cn)) {
+	      la.push_back(child(a, cn));
+	    } else {
+	      la.push_back(a);
+	    }
+	  }
+	}
+	if(qt.isnotleaf(b)) {
+	  for(uint64 cn=0; cn<4; cn++) {
+	    if(qt.contains(cn)) {
+	      la.push_back(child(b, cn));
+	    } else {
+	      la.push_back(b);
+	    }
+	  }
+	}
+	for(std::vector<qblck>::iterator ca = la.begin(); ca != la.end(); ca++) {
+	  for(std::vector<qblck>::iterator cb = lb.begin(); cb != lb.end(); cb++) {
+	    Q.push_back(std::make_pair(*ca, *cb));
 	  }
 	}
       }
     }
   }
   
-  for(uint32 i=0; i<0; i++) {
-    source_id = rand() % nn;
-    printf("source = %d\n", source_id);
-    sssp( dps,
-          nn, h_graph_nodes, h_up_cost, h_mask,
-          ne, h_graph_edges, h_graph_weights,
-          source_id,
-          h_cost );
-  }
+  // for(uint32 i=0; i<0; i++) {
+  //   source_id = rand() % nn;
+  //   printf("source = %d\n", source_id);
+  //   sssp( dps,
+  //         nn, h_graph_nodes, h_up_cost, h_mask,
+  //         ne, h_graph_edges, h_graph_weights,
+  //         source_id,
+  //         h_cost );
+  // }
 
   /********************************************************************************/
 
@@ -282,8 +338,11 @@ int32 main( int32 argc, char** argv) {
 
   //Store the result into a file
   FILE *fpo = fopen("result.txt","w");
-  for(uint32 i=0;i<nn;i++)
-    fprintf(fpo,"%d) cost:%d\n",i,h_cost[i]);
+  approx_dist *ad;
+  for(vector<approx_dist*>::iterator litem = L.begin(); litem != L.end(); litem++) {
+    ad = *litem;
+    fprintf(fpo,"%016x -> %016x = %d\n", ad->za, ad->zb, ad->dg);
+  }
   fclose(fpo);
   printf("Result stored in result.txt\n");
 

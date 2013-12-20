@@ -142,7 +142,7 @@ uint32 Qt::netdiam(uint32 *dists, qblck b) {
   return maxdst;
 }
 
-#if 1
+#if 0
 
 #include <algorithm>
 #include <stdlib.h>

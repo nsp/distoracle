@@ -111,7 +111,7 @@ struct Qt {
 };
 
 // -1 if l <z r, 1 if r <z l, 0 if one contains the other
-int cmp_qblck(const qblck &l, const qblck &r) {
+inline int cmp_qblck(const qblck &l, const qblck &r) {
   level ll = LEVEL_OF_QBLCK(l);
   level rl = LEVEL_OF_QBLCK(r);
   zcode lz = CODE_OF_QBLCK(l);
@@ -135,7 +135,7 @@ int cmp_qblck(const qblck &l, const qblck &r) {
 struct approx_dist {
   zcode za;
   zcode zb;
-  uint64 dg;
+  uint32 dg;
   approx_dist(zcode za, zcode zb, uint32 dg) :
     za(za), zb(zb), dg(dg) {}
 };
