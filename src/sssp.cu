@@ -270,19 +270,45 @@ int32 main( int32 argc, char** argv) {
     } else {
       // Choose rep point of A
       Qvtx *pa = qt.getRep(a);
+      if(NULL == pa) {
+	cout << "nonexistent node ended up in q as a" << endl;
+	continue;
+      }
       // Get sssp from pa
-      cout << " sssp(a)..."; cout.flush();;
-      sssp(dps, nn, h_graph_nodes, h_up_cost, h_mask, ne, h_graph_edges, h_graph_weights, pa->vid, h_cost);
+      cout << " sssp(" << pa->vid << "|" << pa->z <<")..."; cout.flush();;
+      sssp(dps,
+	   nn, h_graph_nodes, h_up_cost, h_mask,
+	   ne, h_graph_edges, h_graph_weights,
+	   pa->vid,
+	   h_cost);
+  // sssp( dps,
+  //       nn, h_graph_nodes, h_up_cost, h_mask,
+  //       ne, h_graph_edges, h_graph_weights,
+  //       source_id,
+  //       h_cost );
       cout << "done" << endl;
       // Measure diameter of A
       uint32 da = qt.netdiam(h_cost, a);
       // Choose rep point of B
       Qvtx *pb = qt.getRep(b);
+      if(NULL == pa) {
+	cout << "nonexistent node ended up in q as b" << endl;
+	continue;
+      }
       // dg = graph_dist(pa, pb)
       uint32 dg_a_b = h_cost[pb->vid];
       // Get sssp from pb
       cout << " sssp(b)..."; cout.flush();;
-      sssp(dps, nn, h_graph_nodes, h_up_cost, h_mask, ne, h_graph_edges, h_graph_weights, pb->vid, h_cost);
+      sssp(dps,
+	   nn, h_graph_nodes, h_up_cost, h_mask,
+	   ne, h_graph_edges, h_graph_weights,
+	   pb->vid,
+	   h_cost);
+  // sssp( dps,
+  //       nn, h_graph_nodes, h_up_cost, h_mask,
+  //       ne, h_graph_edges, h_graph_weights,
+  //       source_id,
+  //       h_cost );
       cout << "done" << endl;
       // Measure diameter of B
       uint32 db = qt.netdiam(h_cost, b);

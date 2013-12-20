@@ -31,7 +31,7 @@ Qt::~Qt() {
 
 bool Qt::contains(qblck b) {
   Qmap::iterator lookup = qmap->find(b);
-  return lookup == qmap->end();
+  return lookup != qmap->end();
 }
 
 void Qt::insert(Qvtx *v) {
