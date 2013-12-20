@@ -134,31 +134,35 @@ uint32 Qt::netdiam(const uint32 *const dists, const qblck b) const {
 #include <iostream>
 #include <vector>
 
-int main(int argc, char* argv[]) {
-  // uint64 x = 0x48392;
-  // uint64 y = 0x72390;
-  // zcode z = morton_code(x, y);
-  // std::pair<uint64, uint64> p = morton_uncode(z);
-  // uint64 px = p.first;
-  // uint64 py = p.second;
-  // printf("%lu %lu %lu %lu %lu\n", x, y, z, px, py);
-  //                    0123456701234567
-  // qblck r = QBLCK(28, 0x03ffffffffffffff);
-  // std::cout << std::hex << (1 << (CODE_SIZE-2-(2*28))) << std::endl;
-  // qblck c00 = child00(r);
-  // qblck c01 = child01(r);
-  // qblck c10 = child10(r);
-  // qblck c11 = child11(r);
+using namespace std;
 
-  // std::cout << std::hex <<
-  //   COUT_QBLCK(r) << " " << std::endl << 
-  //   COUT_QBLCK(c00) << " " << std::endl << 
-  //   COUT_QBLCK(c01) << " " << std::endl << 
-  //   COUT_QBLCK(c10) << " " << std::endl << 
-  //   COUT_QBLCK(c11) << " " << std::endl;
+void decompose(Qt &qt, const qblck b, vector<qblck> &l) {
+  if(qt.isleaf(b)) {
+    l.push_back(b);
+  } else {
+    for(uint64 d=0; d<4; d++) {
+      qblck c = child(b, d);
+      if(qt.contains(c)) {
+	l.push_back(c);
+      }
+    }
+  }
+}
+
+void process_allpairs(const Qt &qt, const vector<qblck> &as, const vector<qblck> &bs, workq &Q) {
+  for(vector<qblck>::const_iterator a = as.begin(); a != as.end(); a++) {
+    for(vector<qblck>::const_iterator b = bs.begin(); b != bs.end(); b++) {
+      if(((*a) != (*b)) || (qt.isnotleaf(*a))) {
+	Q.push_back(make_pair(*a, *b));
+      }
+    }
+  }
+}
+
+int main(int argc, char* argv[]) {
   
   uint64 nn = 264346;
-  std::ifstream cof("NY.co");
+  std::ifstream cof("/home/natep/cuda-workspace/sssp/NY.co");
   std::string v;
   int32 id, lat, lon;
   std::vector<Qvtx*> qvtxes;
@@ -173,71 +177,86 @@ int main(int argc, char* argv[]) {
 
   printf("all read, qt.size=%lu\n", qt.size());
 
-  uint32 *h_costs = (uint32*)malloc(nn*sizeof(uint32));
+  uint32 *h_cost = (uint32*)malloc(nn*sizeof(uint32));
+  //Store the result into a file
+  ofstream rf("/home/natep/cuda-workspace/sssp/result.txt");
   double eps = 0.5;
   double sep = 2/eps;
-  std::vector<approx_dist*> L;
-  std::deque<std::pair<qblck, qblck>> Q;
+  std::deque<std::pair<qblck, qblck> > Q;
   qblck root = QBLCK(0, 0);
-  qt.childpairs(root, Q);
+  Q.push_back(make_pair(root, root));
+  uint64 qiters = 0;
   while(!Q.empty()) {
     qblck a = Q.front().first;
     qblck b = Q.front().second;
     Q.pop_front();
-    if(a==b && qt.isnotleaf(a)) {
-      qt.childpairs(a, Q);
-    } else {
+    cout << ++qiters << "/" << Q.size() << ": ";
+    cout << "a=" << LEVEL_OF_QBLCK(a) << "|" << hex << CODE_OF_QBLCK(a) << dec << ", ";
+    cout << "b=" << LEVEL_OF_QBLCK(b) << "|" << hex << CODE_OF_QBLCK(b) << dec << endl;
+    cerr << qiters << endl;
+    if(a==b) {
+      if(qt.isnotleaf(a)) {
+	cout << " Same nonleaf" << endl;
+	vector<qblck> l;
+	decompose(qt, a, l);
+	process_allpairs(qt, l, l, Q);
+      } else {
+	cout << " Same leaf" << endl;
+      }
+    } else { // do nothing
       // Choose rep point of A
       Qvtx *pa = qt.getRep(a);
+      if(NULL == pa) {
+        cout << "nonexistent node ended up in q as a" << endl;
+        continue;
+      }
       // Get sssp from pa
-      // sssp(dps, nn, h_graph_nodes, h_up_cost, h_mask, ne, h_graph_edges, h_graph_weights, pa->vid, h_cost)
+      cout << " sssp(" << pa->vid << "|" << pa->z <<")..."; cout.flush();;
+      // sssp(dps,
+      //      nn, h_graph_nodes, h_up_cost, h_mask,
+      //      ne, h_graph_edges, h_graph_weights,
+      //      pa->vid,
+      //      h_cost);
+      cout << "done" << endl;
       // Measure diameter of A
-      uint32 da = qt.netdiam(h_costs, a);
-      // dg = graph_dist(pa, pb)
+      uint32 da = qt.netdiam(h_cost, a);
       // Choose rep point of B
       Qvtx *pb = qt.getRep(b);
-      uint32 dg_a_b = h_costs[pb->vid];
+      if(NULL == pa) {
+        cout << "nonexistent node ended up in q as b" << endl;
+        continue;
+      }
+      // dg = graph_dist(pa, pb)
+      uint32 dg_a_b = h_cost[pb->vid];
       // Get sssp from pb
-      // sssp(dps, nn, h_graph_nodes, h_up_cost, h_mask, ne, h_graph_edges, h_graph_weights, pb->vid, h_cost)
+      cout << " sssp(" << pb->vid << "|" << pb->z <<")..."; cout.flush();;
+      // sssp(dps,
+      //      nn, h_graph_nodes, h_up_cost, h_mask,
+      //      ne, h_graph_edges, h_graph_weights,
+      //      pb->vid,
+      //      h_cost);
+      cout << "done" << endl;
       // Measure diameter of B
-      uint32 db = qt.netdiam(h_costs, b);
+      uint32 db = qt.netdiam(h_cost, b);
       // r = max(da, db)
       uint32 r = std::max(da, db);
       // if dg/r >= sep
-      if( dg_a_b/(double)r >= sep ) {
-	L.push_back(new approx_dist(CODE_OF_QBLCK(a), CODE_OF_QBLCK(b), dg_a_b));
+      if( dg_a_b >= sep*r ) {
+        cout << " L: " << hex << CODE_OF_QBLCK(a) << " -> " << CODE_OF_QBLCK(b) << " = " << dec << dg_a_b << endl;
+        rf << CODE_OF_QBLCK(a) << " -> " << CODE_OF_QBLCK(b) << " = " << dg_a_b << endl;
       } else {
-	std::vector<qblck> la, lb;
-	if(qt.isnotleaf(a)) {
-	  for(uint64 cn=0; cn<4; cn++) {
-	    if(qt.contains(cn)) {
-	      la.push_back(child(a, cn));
-	    } else {
-	      la.push_back(a);
-	    }
-	  }
-	}
-	if(qt.isnotleaf(b)) {
-	  for(uint64 cn=0; cn<4; cn++) {
-	    if(qt.contains(cn)) {
-	      la.push_back(child(b, cn));
-	    } else {
-	      la.push_back(b);
-	    }
-	  }
-	}
-	for(std::vector<qblck>::iterator ca = la.begin(); ca != la.end(); ca++) {
-	  for(std::vector<qblck>::iterator cb = lb.begin(); cb != lb.end(); cb++) {
-	    Q.push_back(std::make_pair(*ca, *cb));
-	  }
-	}
+        cout << " ~L" << endl;
+        std::vector<qblck> la, lb;
+	decompose(qt, a, la);
+	decompose(qt, b, lb);
+	process_allpairs(qt, la, lb, Q);
       }
     }
   }
   
-  qblck r = QBLCK(0, 0);
-  Qvtx *rep = qt.getRep(r);
-  std::cout << rep->vid << std::endl;
+  /********************************************************************************/
+
+  std::cout << "Done" << std::endl;
 }
 
 #endif

@@ -155,22 +155,20 @@ void sssp( device_ptrs dps,
 
 }
 
-void decompose(Qt &qt, const qblck b, vector<qblck> l) {
+void decompose(Qt &qt, const qblck b, vector<qblck> &l) {
   if(qt.isleaf(b)) {
     l.push_back(b);
   } else {
     for(uint64 d=0; d<4; d++) {
       qblck c = child(b, d);
-      if(qt.contains(c)) { l.push_back(c); }
+      if(qt.contains(c)) {
+	l.push_back(c);
+      }
     }
   }
 }
 
-void process_allpairs(const Qt &qt, const vector<qblck> as, const vector<qblck> bs, workq &Q) {
-  if(as.size() == 1 && bs.size() == 1) {
-    cout << " allpair(leaves)" << endl;
-    return;
-  }
+void process_allpairs(const Qt &qt, const vector<qblck> &as, const vector<qblck> &bs, workq &Q) {
   for(vector<qblck>::const_iterator a = as.begin(); a != as.end(); a++) {
     for(vector<qblck>::const_iterator b = bs.begin(); b != bs.end(); b++) {
       if(((*a) != (*b)) || (qt.isnotleaf(*a))) {
