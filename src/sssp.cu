@@ -21,7 +21,7 @@ DijkstraKernel1(uint32  no_of_nodes,
                 uint32 *g_graph_edges,
                 uint32 *g_graph_weights,
                 uint32 *g_up_cost,
-                bool   *g_graph_mask,
+                char   *g_graph_mask,
                 uint32 *g_cost) {
   int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
   int i,end,id;
@@ -38,9 +38,9 @@ DijkstraKernel1(uint32  no_of_nodes,
 __global__ void
 DijkstraKernel2(uint32  no_of_nodes,
                 uint32 *g_up_cost,
-                bool   *g_graph_mask,
+                char   *g_graph_mask,
                 uint32 *g_cost,
-                bool   *d_finished) {
+                char   *d_finished) {
   int tid = blockIdx.x*MAX_THREADS_PER_BLOCK + threadIdx.x;
   if(tid<no_of_nodes && g_cost[tid] > g_up_cost[tid]) {
     g_cost[tid] = g_up_cost[tid];
@@ -68,8 +68,8 @@ struct device_ptrs {
   uint32 *nodes;
   uint32 *edges;
   uint32 *evals;
-  bool   *mask;
-  bool   *finished;
+  char   *mask;
+  char   *finished;
 };
 
 void graph_to_dev(device_ptrs dps,
@@ -81,17 +81,17 @@ void graph_to_dev(device_ptrs dps,
 }
 
 void prob_to_dev(device_ptrs dps,
-                 uint32 nn, uint32 *up_cost, uint32 *cost, bool *mask) {
+                 uint32 nn, uint32 *up_cost, uint32 *cost, char *mask) {
   CUDA_CHECK_RETURN( cudaMemcpy( dps.up_cost, up_cost, 4*nn, cudaMemcpyHostToDevice) );
   CUDA_CHECK_RETURN( cudaMemcpy( dps.cost,    cost,    4*nn, cudaMemcpyHostToDevice) );
-  CUDA_CHECK_RETURN( cudaMemcpy( dps.mask,    mask,    sizeof(bool)*nn, cudaMemcpyHostToDevice) );
+  CUDA_CHECK_RETURN( cudaMemcpy( dps.mask,    mask,    nn, cudaMemcpyHostToDevice) );
 }
 
 void sssp( device_ptrs dps,
            const uint32 no_of_nodes,
            const uint32 *h_graph_nodes,
                  uint32 *h_up_cost,
-                 bool   *h_mask,
+                 char   *h_mask,
            const uint32 no_of_edges,
            const uint32 *h_graph_edges,
            const uint32 *h_graph_weights,
@@ -112,8 +112,8 @@ void sssp( device_ptrs dps,
   // Copy lists to device memory
   prob_to_dev(dps, no_of_nodes, h_up_cost, h_cost, h_mask);
 
-  //make a bool to check if the execution is over
-  bool finished;
+  //make a char to check if the execution is over
+  char finished;
 
   // setup execution parameters
   // Make execution Parameters according to the number of nodes
@@ -130,7 +130,6 @@ void sssp( device_ptrs dps,
   cout << "running kernels..."; cout.flush();
   uint32 k=0;
   do {
-    cout << "d1..."; cout.flush();
     DijkstraKernel1<<< grid, threads, 0 >>>( no_of_nodes,
                                              no_of_edges,
                                              dps.nodes,
@@ -141,8 +140,7 @@ void sssp( device_ptrs dps,
                                              dps.cost );
     k++;
     finished = false;
-    CUDA_CHECK_RETURN( cudaMemcpy( dps.finished, &finished, sizeof(bool), cudaMemcpyHostToDevice ) );
-    cout << "d2..."; cout.flush();
+    CUDA_CHECK_RETURN( cudaMemcpy( dps.finished, &finished, 1, cudaMemcpyHostToDevice ) );
     DijkstraKernel2<<< grid, threads, 0 >>>( no_of_nodes,
                                              dps.up_cost,
                                              dps.mask,
@@ -150,11 +148,11 @@ void sssp( device_ptrs dps,
                                              dps.finished);
     CUDA_CHECK_RETURN( cudaThreadSynchronize() );    // Wait for the GPU launched work to complete
     CUDA_CHECK_RETURN( cudaGetLastError() );
-    CUDA_CHECK_RETURN( cudaMemcpy( &finished, dps.finished, sizeof(bool), cudaMemcpyDeviceToHost ) );
+    CUDA_CHECK_RETURN( cudaMemcpy( &finished, dps.finished, 1, cudaMemcpyDeviceToHost ) );
   } while( finished );
-
+  cout << "done in " << k << " iterations..."; cout.flush();
   // copy result from device to host
-  CUDA_CHECK_RETURN( cudaMemcpy( h_cost, dps.cost, sizeof(int)*no_of_nodes, cudaMemcpyDeviceToHost) );
+  CUDA_CHECK_RETURN( cudaMemcpy( h_cost, dps.cost, 4*no_of_nodes, cudaMemcpyDeviceToHost) );
 
 }
 
@@ -178,10 +176,10 @@ int32 main( int32 argc, char** argv) {
 
   // allocate host memory
   uint32 *h_graph_nodes, *h_up_cost;
-  bool   *h_mask;
+  char   *h_mask;
   CUDA_CHECK_RETURN( cudaMallocHost( &h_graph_nodes, sizeof(uint32)*nn ) );
   CUDA_CHECK_RETURN( cudaMallocHost( &h_up_cost,     sizeof(uint32)*nn ) );
-  CUDA_CHECK_RETURN( cudaMallocHost( &h_mask,        sizeof(bool)*nn ) );
+  CUDA_CHECK_RETURN( cudaMallocHost( &h_mask,        nn ) );
 
   // initalize the memory
   uint32 start, edgeno;
@@ -224,8 +222,8 @@ int32 main( int32 argc, char** argv) {
   CUDA_CHECK_RETURN( cudaMalloc( &dps.nodes,   4*nn ) );
   CUDA_CHECK_RETURN( cudaMalloc( &dps.edges,   4*ne ) );
   CUDA_CHECK_RETURN( cudaMalloc( &dps.evals,   4*ne ) );
-  CUDA_CHECK_RETURN( cudaMalloc( &dps.mask,    sizeof(bool)*nn ) );
-  CUDA_CHECK_RETURN( cudaMalloc( &dps.finished,sizeof(bool)));
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.mask,    nn ) );
+  CUDA_CHECK_RETURN( cudaMalloc( &dps.finished,1));
   graph_to_dev( dps,
                 nn, h_graph_nodes,
                 ne, h_graph_edges, h_graph_weights);
@@ -250,9 +248,10 @@ int32 main( int32 argc, char** argv) {
 
   /********************************************************************************/
 
+  //Store the result into a file
+  ofstream rf("/home/natep/cuda-workspace/sssp/result.txt");
   double eps = 0.5;
   double sep = 2/eps;
-  std::vector<approx_dist*> L;
   std::deque<std::pair<qblck, qblck> > Q;
   qblck root = QBLCK(0, 0);
   qt.childpairs(root, Q);
@@ -260,9 +259,10 @@ int32 main( int32 argc, char** argv) {
   while(!Q.empty()) {
     qblck a = Q.front().first;
     qblck b = Q.front().second;
-    cout << ++qiters << ": ";
+    cout << ++qiters << "/" << Q.size() << ": ";
     cout << "a=" << LEVEL_OF_QBLCK(a) << "|" << hex << CODE_OF_QBLCK(a) << dec << ", ";
     cout << "b=" << LEVEL_OF_QBLCK(b) << "|" << hex << CODE_OF_QBLCK(b) << dec << endl;
+    cerr << qiters << endl;
     Q.pop_front();
     if(a==b && qt.isnotleaf(a)) {
       cout << " Same" << endl;
@@ -271,44 +271,34 @@ int32 main( int32 argc, char** argv) {
       // Choose rep point of A
       Qvtx *pa = qt.getRep(a);
       if(NULL == pa) {
-	cout << "nonexistent node ended up in q as a" << endl;
-	continue;
+        cout << "nonexistent node ended up in q as a" << endl;
+        continue;
       }
       // Get sssp from pa
       cout << " sssp(" << pa->vid << "|" << pa->z <<")..."; cout.flush();;
       sssp(dps,
-	   nn, h_graph_nodes, h_up_cost, h_mask,
-	   ne, h_graph_edges, h_graph_weights,
-	   pa->vid,
-	   h_cost);
-  // sssp( dps,
-  //       nn, h_graph_nodes, h_up_cost, h_mask,
-  //       ne, h_graph_edges, h_graph_weights,
-  //       source_id,
-  //       h_cost );
+           nn, h_graph_nodes, h_up_cost, h_mask,
+           ne, h_graph_edges, h_graph_weights,
+           pa->vid,
+           h_cost);
       cout << "done" << endl;
       // Measure diameter of A
       uint32 da = qt.netdiam(h_cost, a);
       // Choose rep point of B
       Qvtx *pb = qt.getRep(b);
       if(NULL == pa) {
-	cout << "nonexistent node ended up in q as b" << endl;
-	continue;
+        cout << "nonexistent node ended up in q as b" << endl;
+        continue;
       }
       // dg = graph_dist(pa, pb)
       uint32 dg_a_b = h_cost[pb->vid];
       // Get sssp from pb
-      cout << " sssp(b)..."; cout.flush();;
+      cout << " sssp(" << pb->vid << "|" << pb->z <<")..."; cout.flush();;
       sssp(dps,
-	   nn, h_graph_nodes, h_up_cost, h_mask,
-	   ne, h_graph_edges, h_graph_weights,
-	   pb->vid,
-	   h_cost);
-  // sssp( dps,
-  //       nn, h_graph_nodes, h_up_cost, h_mask,
-  //       ne, h_graph_edges, h_graph_weights,
-  //       source_id,
-  //       h_cost );
+           nn, h_graph_nodes, h_up_cost, h_mask,
+           ne, h_graph_edges, h_graph_weights,
+           pb->vid,
+           h_cost);
       cout << "done" << endl;
       // Measure diameter of B
       uint32 db = qt.netdiam(h_cost, b);
@@ -316,34 +306,34 @@ int32 main( int32 argc, char** argv) {
       uint32 r = std::max(da, db);
       // if dg/r >= sep
       if( dg_a_b/(double)r >= sep ) {
-	cout << " L" << endl;
-	L.push_back(new approx_dist(CODE_OF_QBLCK(a), CODE_OF_QBLCK(b), dg_a_b));
+        cout << " L: " << hex << CODE_OF_QBLCK(a) << " -> " << CODE_OF_QBLCK(b) << " = " << dec << dg_a_b << endl;
+        rf << CODE_OF_QBLCK(a) << " -> " << CODE_OF_QBLCK(b) << " = " << dg_a_b << endl;
       } else {
-	cout << " ~L" << endl;
-	std::vector<qblck> la, lb;
-	if(qt.isnotleaf(a)) {
-	  for(uint64 cn=0; cn<4; cn++) {
-	    if(qt.contains(cn)) {
-	      la.push_back(child(a, cn));
-	    } else {
-	      la.push_back(a);
-	    }
-	  }
-	}
-	if(qt.isnotleaf(b)) {
-	  for(uint64 cn=0; cn<4; cn++) {
-	    if(qt.contains(cn)) {
-	      la.push_back(child(b, cn));
-	    } else {
-	      la.push_back(b);
-	    }
-	  }
-	}
-	for(std::vector<qblck>::iterator ca = la.begin(); ca != la.end(); ca++) {
-	  for(std::vector<qblck>::iterator cb = lb.begin(); cb != lb.end(); cb++) {
-	    Q.push_back(std::make_pair(*ca, *cb));
-	  }
-	}
+        cout << " ~L" << endl;
+        std::vector<qblck> la, lb;
+        if(qt.isnotleaf(a)) {
+          for(uint64 cn=0; cn<4; cn++) {
+            if(qt.contains(cn)) {
+              la.push_back(child(a, cn));
+            } else {
+              la.push_back(a);
+            }
+          }
+        }
+        if(qt.isnotleaf(b)) {
+          for(uint64 cn=0; cn<4; cn++) {
+            if(qt.contains(cn)) {
+              la.push_back(child(b, cn));
+            } else {
+              la.push_back(b);
+            }
+          }
+        }
+        for(std::vector<qblck>::iterator ca = la.begin(); ca != la.end(); ca++) {
+          for(std::vector<qblck>::iterator cb = lb.begin(); cb != lb.end(); cb++) {
+            Q.push_back(std::make_pair(*ca, *cb));
+          }
+        }
       }
     }
   }
@@ -363,13 +353,7 @@ int32 main( int32 argc, char** argv) {
   printf("Computation finished\n");
 
   //Store the result into a file
-  FILE *fpo = fopen("/home/natep/cuda-workspace/sssp/result.txt","w");
-  approx_dist *ad;
-  for(vector<approx_dist*>::iterator litem = L.begin(); litem != L.end(); litem++) {
-    ad = *litem;
-    fprintf(fpo,"%016x -> %016x = %d\n", ad->za, ad->zb, ad->dg);
-  }
-  fclose(fpo);
+  rf.close();
   printf("Result stored in result.txt\n");
 
   // cleanup memory  
