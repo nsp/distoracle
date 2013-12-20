@@ -277,7 +277,7 @@ int build_oracle() {
     cout << ++qiters << "/" << Q.size() << ": ";
     cout << "a=" << LEVEL_OF_QBLCK(a) << "|" << hex << CODE_OF_QBLCK(a) << dec << ", ";
     cout << "b=" << LEVEL_OF_QBLCK(b) << "|" << hex << CODE_OF_QBLCK(b) << dec << endl;
-    cerr << qiters << endl;
+    // cerr << qiters << endl;
     Q.pop_front();
     if(a==b) {
       if(qt.isnotleaf(a)) {
@@ -295,11 +295,11 @@ int build_oracle() {
       }
       // Get sssp from pa
       cout << " sssp(" << pa->vid << "|" << pa->z <<")..."; cout.flush();;
-      sssp(dps,
-           nn, h_graph_nodes, h_up_cost, h_mask,
-           ne, h_graph_edges, h_graph_weights,
-           pa->vid,
-           h_cost);
+      // sssp(dps,
+      //      nn, h_graph_nodes, h_up_cost, h_mask,
+      //      ne, h_graph_edges, h_graph_weights,
+      //      pa->vid,
+      //      h_cost);
       cout << "done" << endl;
       // Measure diameter of A
       uint32 da = qt.netdiam(h_cost, a);
@@ -313,18 +313,18 @@ int build_oracle() {
       uint32 dg_a_b = h_cost[pb->vid];
       // Get sssp from pb
       cout << " sssp(" << pb->vid << "|" << pb->z <<")..."; cout.flush();;
-      sssp(dps,
-           nn, h_graph_nodes, h_up_cost, h_mask,
-           ne, h_graph_edges, h_graph_weights,
-           pb->vid,
-           h_cost);
+      // sssp(dps,
+      //      nn, h_graph_nodes, h_up_cost, h_mask,
+      //      ne, h_graph_edges, h_graph_weights,
+      //      pb->vid,
+      //      h_cost);
       cout << "done" << endl;
       // Measure diameter of B
       uint32 db = qt.netdiam(h_cost, b);
       // r = max(da, db)
       uint32 r = std::max(da, db);
       // if dg/r >= sep
-      if( dg_a_b >= sep*r ) {
+      if( 0 && dg_a_b >= sep*r ) {
         cout << " L: " << hex << CODE_OF_QBLCK(a) << " -> " << CODE_OF_QBLCK(b) << " = " << dec << dg_a_b << endl;
         rf << CODE_OF_QBLCK(a) << " -> " << CODE_OF_QBLCK(b) << " = " << dg_a_b << endl;
       } else {
