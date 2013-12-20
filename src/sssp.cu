@@ -72,6 +72,16 @@ struct device_ptrs {
   char   *finished;
 };
 
+struct host_ptrs {
+  uint32  nn;
+  uint32  ne;
+  uint32 *graph_nodes;
+  uint32 *up_cost;
+  uint32 *graph_edges;
+  uint32 *graph_weights;
+  char   *mask;
+};
+
 void graph_to_dev(device_ptrs dps,
                   uint32 nn, uint32 *nodes,
                   uint32 ne, uint32 *edges, uint32 *evals) {
@@ -87,30 +97,22 @@ void prob_to_dev(device_ptrs dps,
   CUDA_CHECK_RETURN( cudaMemcpy( dps.mask,    mask,    nn, cudaMemcpyHostToDevice) );
 }
 
-void sssp( device_ptrs dps,
-           const uint32 no_of_nodes,
-           const uint32 *h_graph_nodes,
-                 uint32 *h_up_cost,
-                 char   *h_mask,
-           const uint32 no_of_edges,
-           const uint32 *h_graph_edges,
-           const uint32 *h_graph_weights,
-           const uint32 source_id,
+void sssp( device_ptrs dps, host_ptrs hps, const uint32 source_id,
            uint32 *h_cost) {
-  cout << "in sssp..."; cout.flush();
+  cout << " sssp(" << source_id << ")..."; cout.flush();;
   const uint32 MAX_COST = 1 << 30;
 
-  for( uint32 i=0; i<no_of_nodes; i++) {
-    h_up_cost[i] = MAX_COST;
-    h_cost[i]    = MAX_COST;
-    h_mask[i]    = false;
+  for( uint32 i=0; i<hps.nn; i++) {
+    hps.up_cost[i] = MAX_COST;
+    h_cost[i]      = MAX_COST;
+    hps.mask[i]    = false;
   }
 
   h_cost[source_id] = 0;
-  h_mask[source_id] = true;
+  hps.mask[source_id] = true;
 
   // Copy lists to device memory
-  prob_to_dev(dps, no_of_nodes, h_up_cost, h_cost, h_mask);
+  prob_to_dev(dps, hps.nn, hps.up_cost, h_cost, hps.mask);
 
   //make a char to check if the execution is over
   char finished;
@@ -119,9 +121,9 @@ void sssp( device_ptrs dps,
   // Make execution Parameters according to the number of nodes
   // Distribute threads across multiple Blocks if necessary
   uint32 num_of_blocks = 1;
-  uint32 num_of_threads_per_block = no_of_nodes;
-  if(no_of_nodes>MAX_THREADS_PER_BLOCK) {
-    num_of_blocks = (uint32)ceil(no_of_nodes/(double)MAX_THREADS_PER_BLOCK);
+  uint32 num_of_threads_per_block = hps.nn;
+  if(hps.nn>MAX_THREADS_PER_BLOCK) {
+    num_of_blocks = (uint32)ceil(hps.nn/(double)MAX_THREADS_PER_BLOCK);
     num_of_threads_per_block = MAX_THREADS_PER_BLOCK;
   }
   dim3  grid( num_of_blocks, 1, 1);
@@ -130,8 +132,8 @@ void sssp( device_ptrs dps,
   cout << "running kernels..."; cout.flush();
   uint32 k=0;
   do {
-    DijkstraKernel1<<< grid, threads, 0 >>>( no_of_nodes,
-                                             no_of_edges,
+    DijkstraKernel1<<< grid, threads, 0 >>>( hps.nn,
+                                             hps.ne,
                                              dps.nodes,
                                              dps.edges,
                                              dps.evals,
@@ -140,7 +142,7 @@ void sssp( device_ptrs dps,
                                              dps.cost );
     k++;
     CUDA_CHECK_RETURN( cudaMemset( dps.finished, 0, 1 ) );
-    DijkstraKernel2<<< grid, threads, 0 >>>( no_of_nodes,
+    DijkstraKernel2<<< grid, threads, 0 >>>( hps.nn,
                                              dps.up_cost,
                                              dps.mask,
                                              dps.cost,
@@ -151,28 +153,78 @@ void sssp( device_ptrs dps,
   } while( finished );
   cout << "done in " << k << " iterations..."; cout.flush();
   // copy result from device to host
-  CUDA_CHECK_RETURN( cudaMemcpy( h_cost, dps.cost, 4*no_of_nodes, cudaMemcpyDeviceToHost) );
-
+  CUDA_CHECK_RETURN( cudaMemcpy( h_cost, dps.cost, 4*hps.nn, cudaMemcpyDeviceToHost) );
+  cout << "done" << endl;
 }
 
-void decompose(Qt &qt, const qblck b, vector<qblck> &l) {
+void decompose(const Qt &qt, const qblck b, vector<qblck> &l) {
   if(qt.isleaf(b)) {
     l.push_back(b);
   } else {
     for(uint64 d=0; d<4; d++) {
       qblck c = child(b, d);
       if(qt.contains(c)) {
-	l.push_back(c);
+        l.push_back(c);
       }
     }
   }
 }
 
-void process_allpairs(const Qt &qt, const vector<qblck> &as, const vector<qblck> &bs, workq &Q) {
+void enque_allpairs(const Qt &qt, const vector<qblck> &as, const vector<qblck> &bs, workq &Q) {
   for(vector<qblck>::const_iterator a = as.begin(); a != as.end(); a++) {
     for(vector<qblck>::const_iterator b = bs.begin(); b != bs.end(); b++) {
       if(((*a) != (*b)) || (qt.isnotleaf(*a))) {
-	Q.push_back(make_pair(*a, *b));
+        Q.push_back(make_pair(*a, *b));
+      }
+    }
+  }
+}
+
+void process_allpairs(const double sep, ofstream &rf,
+                      const Qt &qt, const vector<qblck> &as, const vector<qblck> &bs,
+                      workq &Q, device_ptrs dps, host_ptrs hps, uint32 *h_cost) {
+  for(vector<qblck>::const_iterator a = as.begin(); a != as.end(); a++) {
+    Qvtx *pa = qt.getRep(*a);
+    sssp(dps, hps, pa->vid, h_cost);
+    uint32 da = qt.netdiam(h_cost, *a);
+    vector<uint32> dg_a_bs;
+    vector<Qvtx*> pbs;
+    for(vector<qblck>::const_iterator b = bs.begin(); b != bs.end(); b++) {
+      if(((*a) == (*b)) && (qt.isnotleaf(*a))) { // Maintain vectors for indexing
+        pbs.push_back(pa);
+        dg_a_bs.push_back(0);
+      } else {
+        // a and b distinct, lets compute sssps all around
+        Qvtx *pb = qt.getRep(*b);
+        pbs.push_back(pb);
+        dg_a_bs.push_back(h_cost[pb->vid]);
+      }
+    }
+    for(uint64 i=0; i<bs.size(); i++) {
+      const qblck *b = &bs.at(i);
+      if(((*a) == (*b)) && (qt.isnotleaf(*a))) {
+        Q.push_back(make_pair(*a, *b));
+      } else {
+        // a and b distinct, lets compute sssps all around
+        Qvtx *pb      = pbs.at(i);
+        uint32 dg_a_b = dg_a_bs.at(i);
+        sssp(dps, hps, pb->vid, h_cost);
+        // Measure diameter of B
+        uint32 db = qt.netdiam(h_cost, *b);
+        // r = max(da, db)
+        uint32 r = std::max(da, db);
+        // if dg/r >= sep
+        if( dg_a_b >= sep*r ) {
+          cout << " L: " << hex << CODE_OF_QBLCK(*a) << " -> ";
+          cout << CODE_OF_QBLCK(*b) << " = " << dec << dg_a_b << endl;
+          rf << CODE_OF_QBLCK(*a) << " -> " << CODE_OF_QBLCK(*b) << " = " << dg_a_b << endl;
+        } else {
+          cout << " ~L" << endl;
+          std::vector<qblck> la, lb;
+          decompose(qt, *a, la);
+          decompose(qt, *b, lb);
+          enque_allpairs(qt, la, lb, Q);
+        }
       }
     }
   }
@@ -229,6 +281,16 @@ int build_oracle() {
   }
 
   if(fp) fclose(fp);
+
+  // Put all host pointers (except h_cost) together
+  host_ptrs hps;
+  hps.nn = nn;
+  hps.ne = ne;
+  hps.graph_nodes = h_graph_nodes;
+  hps.up_cost = h_up_cost;
+  hps.graph_edges = h_graph_edges;
+  hps.graph_weights = h_graph_weights;
+  hps.mask = h_mask;
 
   printf("Read File\n");
   printf("Avg Branching Factor: %f\n",ne/(float)nn);
@@ -288,14 +350,15 @@ int build_oracle() {
     cerr << qiters << endl;
     if(a==b) {
       if(qt.isnotleaf(a)) {
-	cout << " Same nonleaf" << endl;
-	vector<qblck> l;
-	decompose(qt, a, l);
-	process_allpairs(qt, l, l, Q);
-      } else {
-	cout << " Same leaf" << endl;
+        cout << " Same nonleaf" << endl;
+        vector<qblck> l;
+        decompose(qt, a, l);
+        process_allpairs(sep, rf, qt, l, l, Q, dps, hps, h_cost);
+      } else { // do nothing
+        cout << " Same leaf" << endl;
       }
-    } else { // do nothing
+    } else {
+      cout << " a!=b" << endl;
       // Choose rep point of A
       Qvtx *pa = qt.getRep(a);
       if(NULL == pa) {
@@ -303,13 +366,7 @@ int build_oracle() {
         continue;
       }
       // Get sssp from pa
-      cout << " sssp(" << pa->vid << "|" << pa->z <<")..."; cout.flush();;
-      sssp(dps,
-           nn, h_graph_nodes, h_up_cost, h_mask,
-           ne, h_graph_edges, h_graph_weights,
-           pa->vid,
-           h_cost);
-      cout << "done" << endl;
+      sssp(dps, hps, pa->vid, h_cost);
       // Measure diameter of A
       uint32 da = qt.netdiam(h_cost, a);
       // Choose rep point of B
@@ -321,13 +378,7 @@ int build_oracle() {
       // dg = graph_dist(pa, pb)
       uint32 dg_a_b = h_cost[pb->vid];
       // Get sssp from pb
-      cout << " sssp(" << pb->vid << "|" << pb->z <<")..."; cout.flush();;
-      sssp(dps,
-           nn, h_graph_nodes, h_up_cost, h_mask,
-           ne, h_graph_edges, h_graph_weights,
-           pb->vid,
-           h_cost);
-      cout << "done" << endl;
+      sssp(dps, hps, pb->vid, h_cost);
       // Measure diameter of B
       uint32 db = qt.netdiam(h_cost, b);
       // r = max(da, db)
@@ -339,13 +390,13 @@ int build_oracle() {
       } else {
         cout << " ~L" << endl;
         std::vector<qblck> la, lb;
-	decompose(qt, a, la);
-	decompose(qt, b, lb);
-	process_allpairs(qt, la, lb, Q);
+        decompose(qt, a, la);
+        decompose(qt, b, lb);
+        process_allpairs(sep, rf, qt, la, lb, Q, dps, hps, h_cost);
       }
     }
   }
-  
+
   /********************************************************************************/
 
   printf("Computation finished\n");
@@ -354,7 +405,7 @@ int build_oracle() {
   rf.close();
   printf("Result stored in result.txt\n");
 
-  // cleanup memory  
+  // cleanup memory
   CUDA_CHECK_RETURN(cudaFreeHost(h_graph_nodes));
   CUDA_CHECK_RETURN(cudaFreeHost(h_graph_edges));
   CUDA_CHECK_RETURN(cudaFreeHost(h_graph_weights));
