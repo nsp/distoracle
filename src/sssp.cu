@@ -165,7 +165,7 @@ int32 main( int32 argc, char** argv) {
 
   printf("Reading File\n");
   // Read in Graph from a file
-  FILE *fp = fopen("NY.out","r");
+  FILE *fp = fopen("/home/natep/cuda-workspace/sssp/NY.out","r");
   if(!fp) {
     printf("Error Reading graph file\n");
     return -1;
@@ -232,7 +232,7 @@ int32 main( int32 argc, char** argv) {
 
   /********************************************************************************/
 
-  ifstream cof("NY.co");
+  ifstream cof("/home/natep/cuda-workspace/sssp/NY.co");
   string v;
   uint32 lat, lon;
   uint32 max = 1U << 28;
@@ -337,7 +337,7 @@ int32 main( int32 argc, char** argv) {
   printf("Computation finished\n");
 
   //Store the result into a file
-  FILE *fpo = fopen("result.txt","w");
+  FILE *fpo = fopen("/home/natep/cuda-workspace/sssp/result.txt","w");
   approx_dist *ad;
   for(vector<approx_dist*>::iterator litem = L.begin(); litem != L.end(); litem++) {
     ad = *litem;
