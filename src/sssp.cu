@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <map>
 
 #include "types.h"
 #include "qt.hpp"
@@ -180,39 +181,56 @@ void enque_allpairs(const Qt &qt, const vector<qblck> &as, const vector<qblck> &
   }
 }
 
+struct qblck_info {
+  typedef typename std::map<qblck, uint32> distmap;
+  uint32   netdiam;
+  Qvtx    *p;
+  distmap *dists;
+  
+  qblck_info(uint32 d, Qvtx *pt) : netdiam(d), p(pt) { dists = new distmap; };
+  ~qblck_info() { cout << "~" << endl; delete dists; };
+};
+
 void process_allpairs(const double sep, ofstream &rf,
-                      const Qt &qt, const vector<qblck> &as, const vector<qblck> &bs,
+                      const Qt &qt, vector<qblck> &as, vector<qblck> &bs,
                       workq &Q, device_ptrs dps, host_ptrs hps, uint32 *h_cost) {
-  for(vector<qblck>::const_iterator a = as.begin(); a != as.end(); a++) {
+  map<qblck, qblck_info*> qblock_cache;
+  for(vector<qblck>::iterator a = as.begin(); a != as.end(); a++) {
     Qvtx *pa = qt.getRep(*a);
     sssp(dps, hps, pa->vid, h_cost);
-    uint32 da = qt.netdiam(h_cost, *a);
-    vector<uint32> dg_a_bs;
-    vector<Qvtx*> pbs;
-    for(vector<qblck>::const_iterator b = bs.begin(); b != bs.end(); b++) {
+    uint32 d = qt.netdiam(h_cost, *a);
+    qblock_cache.insert(make_pair(*a, new qblck_info(d, pa)));
+
+    for(vector<qblck>::iterator b = bs.begin(); b != bs.end(); b++) {
       if(((*a) == (*b)) && (qt.isnotleaf(*a))) { // Maintain vectors for indexing
-        pbs.push_back(pa);
-        dg_a_bs.push_back(0);
       } else {
         // a and b distinct, lets compute sssps all around
         Qvtx *pb = qt.getRep(*b);
-        pbs.push_back(pb);
-        dg_a_bs.push_back(h_cost[pb->vid]);
+	qblock_cache.find(*a)->second->dists->insert(make_pair(*b, h_cost[pb->vid]));
       }
     }
+  }
+  for(vector<qblck>::iterator a = as.begin(); a != as.end(); a++) {
+    qblck_info *qblcki = qblock_cache.find(*a)->second;
     for(uint64 i=0; i<bs.size(); i++) {
       const qblck *b = &bs.at(i);
       if(((*a) == (*b)) && (qt.isnotleaf(*a))) {
         Q.push_back(make_pair(*a, *b));
       } else {
         // a and b distinct, lets compute sssps all around
-        Qvtx *pb      = pbs.at(i);
-        uint32 dg_a_b = dg_a_bs.at(i);
-        sssp(dps, hps, pb->vid, h_cost);
-        // Measure diameter of B
-        uint32 db = qt.netdiam(h_cost, *b);
+        Qvtx *pb      = qt.getRep(*b);
+        uint32 dg_a_b = qblcki->dists->find(*b)->second;
+	map<qblck, qblck_info*>::iterator bi = qblock_cache.find(*b);
+	uint32 db = 0;
+	if(bi != qblock_cache.end()) {
+	  db = bi->second->netdiam;
+	} else {
+	  sssp(dps, hps, pb->vid, h_cost);
+	  // Measure diameter of B
+	  db = qt.netdiam(h_cost, *b);
+	}
         // r = max(da, db)
-        uint32 r = std::max(da, db);
+        uint32 r = std::max(qblcki->netdiam, db);
         // if dg/r >= sep
         if( dg_a_b >= sep*r ) {
           cout << " L: " << hex << CODE_OF_QBLCK(*a) << " -> ";
