@@ -139,8 +139,7 @@ void sssp( device_ptrs dps,
                                              dps.mask,
                                              dps.cost );
     k++;
-    finished = false;
-    CUDA_CHECK_RETURN( cudaMemcpy( dps.finished, &finished, 1, cudaMemcpyHostToDevice ) );
+    CUDA_CHECK_RETURN( cudaMemset( dps.finished, 0, 1 ) );
     DijkstraKernel2<<< grid, threads, 0 >>>( no_of_nodes,
                                              dps.up_cost,
                                              dps.mask,
