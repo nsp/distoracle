@@ -155,6 +155,22 @@ void sssp( device_ptrs dps,
 
 }
 
+void childpairs(const Qt &qt, const qblck b, workq &Q) {
+    for(uint32 dl=0; dl<4; dl++) {
+    qblck cl = child(b, dl);
+    if(qt.contains(cl)) {
+      for(uint32 dr=0; dr<4; dr++) {
+	qblck cr = child(b, dr);
+	if(qt.contains(cr)) {
+	  if((cl != cr) || (cl==cr && qt.isnotleaf(cl))) {
+	    Q.push_back(std::make_pair(cl, cr));
+	  }
+	}
+      }
+    }
+  }
+}
+
 int build_oracle() {
 
   uint32 nn = 0;
@@ -253,7 +269,7 @@ int build_oracle() {
   double sep = 2/eps;
   std::deque<std::pair<qblck, qblck> > Q;
   qblck root = QBLCK(0, 0);
-  qt.childpairs(root, Q);
+  childpairs(qt, root, Q);
   uint64 qiters = 0;
   while(!Q.empty()) {
     qblck a = Q.front().first;
@@ -266,7 +282,7 @@ int build_oracle() {
     if(a==b) {
       if(qt.isnotleaf(a)) {
 	cout << " Same nonleaf" << endl;
-	qt.childpairs(a, Q);
+	childpairs(qt, a, Q);
       } else {
 	cout << " Same leaf" << endl;
       }
@@ -315,20 +331,20 @@ int build_oracle() {
         cout << " ~L" << endl;
         std::vector<qblck> la, lb;
         if(qt.isnotleaf(a)) {
-          for(uint64 cn=0; cn<4; cn++) {
-	    qblck ac = child(a, cn);
-            if(qt.contains(ac)) {
-              la.push_back(ac);
+          for(uint64 d=0; d<4; d++) {
+	    qblck c = child(a, d);
+            if(qt.contains(c)) {
+              la.push_back(c);
             }
 	  }
 	} else {
 	  la.push_back(a);
         }
         if(qt.isnotleaf(b)) {
-          for(uint64 cn=0; cn<4; cn++) {
-	    qblck bc = child(b, cn);
-            if(qt.contains(bc)) {
-              la.push_back(bc);
+          for(uint64 d=0; d<4; d++) {
+	    qblck c = child(b, d);
+            if(qt.contains(c)) {
+              la.push_back(c);
             }
 	  }
 	} else {

@@ -21,7 +21,7 @@ Qt::~Qt() {
   delete qmap;
 }
 
-bool Qt::contains(qblck b) {
+bool Qt::contains(const qblck b) const {
   Qmap::iterator lookup = qmap->find(b);
   return lookup != qmap->end();
 }
@@ -61,30 +61,30 @@ void Qt::insert(Qvtx *v) {
   }
 }
 
-uint64 Qt::size() {
+uint64 Qt::size() const {
   return qmap->size();
 }
 
-bool Qt::isleaf(qblck b) {
-  Qmap::iterator lookup = qmap->find(b);
+bool Qt::isleaf(const qblck b) const {
+  Qmap::const_iterator lookup = qmap->find(b);
   if(lookup == qmap->end()) {
     return false;
   }
   return lookup.key() == b;
 }
 
-bool Qt::isnotleaf(qblck b) {
+bool Qt::isnotleaf(const qblck b) const {
   return !isleaf(b);
 }
 
-uint64 crowdist2(latlon a, latlon b) {
+uint64 crowdist2(const latlon a, const latlon b) {
   uint64 xd = std::max(a.first, b.first) - std::min(a.first, b.first);
   uint64 yd = std::max(a.second, b.second) - std::min(a.second, b.second);
   return xd*xd + yd*yd;
 }
 
-Qvtx* Qt::getRep(qblck b) {
-  Qmap::iterator lookup = qmap->find(b);
+Qvtx* Qt::getRep(const qblck b) const {
+  Qmap::const_iterator lookup = qmap->find(b);
   if(lookup == qmap->end()) { // no block
     return NULL;
   } else if(lookup.key() == b) { // is leaf
@@ -107,28 +107,12 @@ Qvtx* Qt::getRep(qblck b) {
   return minvtx;
 }
 
-void Qt::childpairs(qblck b, workq &Q) {
-    for(uint32 dl=0; dl<4; dl++) {
-    qblck cl = child(b, dl);
-    if(contains(cl)) {
-      for(uint32 dr=0; dr<4; dr++) {
-	qblck cr = child(b, dr);
-	if(contains(cr)) {
-	  if((cl != cr) || (cl==cr && isnotleaf(cl))) {
-	    Q.push_back(std::make_pair(cl, cr));
-	  }
-	}
-      }
-    }
-  }
-}
-
-uint32 Qt::netdiam(uint32 *dists, qblck b) {
+uint32 Qt::netdiam(const uint32 *const dists, const qblck b) const {
   if(isleaf(b)) {
     return 0;
   }
   uint32 maxdst = 0, dst;
-  Qmap::iterator lookup = qmap->find(b);
+  Qmap::const_iterator lookup = qmap->find(b);
   while(lookup != qmap->end() && cmp_qblck(lookup.key(), b) == 0) {
     dst = dists[lookup->second->vid];
     if(dst >= maxdst) {

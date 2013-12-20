@@ -92,14 +92,13 @@ struct Qvtx {
 struct Qt {
   Qt();
   ~Qt();
-  bool contains(qblck b);
+  bool contains(const qblck b) const;
   void insert(Qvtx *v);
-  uint64 size();
-  Qvtx* getRep(qblck b);
-  bool isleaf(qblck b);
-  bool isnotleaf(qblck b);
-  void childpairs(qblck b, workq &Q);
-  uint32 netdiam(uint32 *dists, qblck b);
+  uint64 size() const;
+  Qvtx* getRep(const qblck b) const;
+  bool isleaf(const qblck b) const;
+  bool isnotleaf(const qblck b) const;
+  uint32 netdiam(const uint32 *const dists, const qblck b) const;
 };
 
 // -1 if l <z r, 1 if r <z l, 0 if one contains the other
