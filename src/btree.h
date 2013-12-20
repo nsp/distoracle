@@ -420,6 +420,12 @@ struct btree_binary_search_compare_to {
   }
 };
 
+// From Issue 16
+template <typename To, typename From>
+  To reconst_cast(From& from) {
+  return reinterpret_cast<To>(from);
+}
+
 // A node in the btree holding. The same node type is used for both internal
 // and leaf nodes in the btree, though the nodes are allocated in such a way
 // that the children array is only valid in internal nodes.
@@ -554,10 +560,10 @@ class btree_node {
     return params_type::key(fields_.values[i]);
   }
   reference value(int i) {
-    return reinterpret_cast<reference>(fields_.values[i]);
+    return reconst_cast<reference>(fields_.values[i]);
   }
   const_reference value(int i) const {
-    return reinterpret_cast<const_reference>(fields_.values[i]);
+    return reconst_cast<const_reference>(fields_.values[i]);
   }
   mutable_value_type* mutable_value(int i) {
     return &fields_.values[i];

@@ -13,14 +13,6 @@ typedef btree::btree_map<qblck, Qvtx*, QblckComparer> Qmap;
 
 Qmap *qmap;
 
-Qmap::iterator *it;
-
-void qtree_iterator::increment() { it->increment(); }
-
-qblck qtree_iterator::qblock() { return it->key(); }
-
-Qvtx* qtree_iterator::qvtx() { return (*it)->second; }
-
 Qt::Qt() {
   qmap = new Qmap;
 }
@@ -95,8 +87,10 @@ Qvtx* Qt::getRep(qblck b) {
   Qmap::iterator lookup = qmap->find(b);
   if(lookup == qmap->end()) { // no block
     return NULL;
+  } else if(lookup.key() == b) { // is leaf
+    return lookup->second;
   }
-  // Return closest
+  // Nonleaf, return closest
   latlon cxy = morton_uncode(CODE_OF_QBLCK(child11(b)));
   Qvtx *minvtx = lookup->second;
   uint64 mindst = crowdist2(morton_uncode(minvtx->z), cxy);
@@ -130,6 +124,9 @@ void Qt::childpairs(qblck b, workq &Q) {
 }
 
 uint32 Qt::netdiam(uint32 *dists, qblck b) {
+  if(isleaf(b)) {
+    return 0;
+  }
   uint32 maxdst = 0, dst;
   Qmap::iterator lookup = qmap->find(b);
   while(lookup != qmap->end() && cmp_qblck(lookup.key(), b) == 0) {

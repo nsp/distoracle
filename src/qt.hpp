@@ -89,13 +89,6 @@ struct Qvtx {
   ~Qvtx() {}
 };
 
-//  qblck, Qvtx
-struct qtree_iterator {
-  void increment();
-  qblck qblock();
-  Qvtx* qvtx();
-};
-
 struct Qt {
   Qt();
   ~Qt();
@@ -103,7 +96,6 @@ struct Qt {
   void insert(Qvtx *v);
   uint64 size();
   Qvtx* getRep(qblck b);
-  qtree_iterator block_it(qblck b);
   bool isleaf(qblck b);
   bool isnotleaf(qblck b);
   void childpairs(qblck b, workq &Q);
@@ -131,13 +123,5 @@ inline int cmp_qblck(const qblck &l, const qblck &r) {
   // return (0 < diff) - (diff < 0);
   return (lz < rz) ? -1 : ((lz > rz) ? 1 : 0);
 }
-
-struct approx_dist {
-  zcode za;
-  zcode zb;
-  uint32 dg;
-  approx_dist(zcode za, zcode zb, uint32 dg) :
-    za(za), zb(zb), dg(dg) {}
-};
 
 #endif // _QT_H_

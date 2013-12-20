@@ -155,7 +155,7 @@ void sssp( device_ptrs dps,
 
 }
 
-int32 main( int32 argc, char** argv) {
+int build_oracle() {
 
   uint32 nn = 0;
   uint32 ne = 0;
@@ -263,10 +263,14 @@ int32 main( int32 argc, char** argv) {
     cout << "b=" << LEVEL_OF_QBLCK(b) << "|" << hex << CODE_OF_QBLCK(b) << dec << endl;
     cerr << qiters << endl;
     Q.pop_front();
-    if(a==b && qt.isnotleaf(a)) {
-      cout << " Same" << endl;
-      qt.childpairs(a, Q);
-    } else {
+    if(a==b) {
+      if(qt.isnotleaf(a)) {
+	cout << " Same nonleaf" << endl;
+	qt.childpairs(a, Q);
+      } else {
+	cout << " Same leaf" << endl;
+      }
+    } else { // do nothing
       // Choose rep point of A
       Qvtx *pa = qt.getRep(a);
       if(NULL == pa) {
@@ -304,7 +308,7 @@ int32 main( int32 argc, char** argv) {
       // r = max(da, db)
       uint32 r = std::max(da, db);
       // if dg/r >= sep
-      if( dg_a_b/(double)r >= sep ) {
+      if( dg_a_b >= sep*r ) {
         cout << " L: " << hex << CODE_OF_QBLCK(a) << " -> " << CODE_OF_QBLCK(b) << " = " << dec << dg_a_b << endl;
         rf << CODE_OF_QBLCK(a) << " -> " << CODE_OF_QBLCK(b) << " = " << dg_a_b << endl;
       } else {
@@ -312,21 +316,23 @@ int32 main( int32 argc, char** argv) {
         std::vector<qblck> la, lb;
         if(qt.isnotleaf(a)) {
           for(uint64 cn=0; cn<4; cn++) {
-            if(qt.contains(cn)) {
-              la.push_back(child(a, cn));
-            } else {
-              la.push_back(a);
+	    qblck ac = child(a, cn);
+            if(qt.contains(ac)) {
+              la.push_back(ac);
             }
-          }
+	  }
+	} else {
+	  la.push_back(a);
         }
         if(qt.isnotleaf(b)) {
           for(uint64 cn=0; cn<4; cn++) {
-            if(qt.contains(cn)) {
-              la.push_back(child(b, cn));
-            } else {
-              la.push_back(b);
+	    qblck bc = child(b, cn);
+            if(qt.contains(bc)) {
+              la.push_back(bc);
             }
-          }
+	  }
+	} else {
+	  la.push_back(b);
         }
         for(std::vector<qblck>::iterator ca = la.begin(); ca != la.end(); ca++) {
           for(std::vector<qblck>::iterator cb = lb.begin(); cb != lb.end(); cb++) {
@@ -337,16 +343,6 @@ int32 main( int32 argc, char** argv) {
     }
   }
   
-  // for(uint32 i=0; i<0; i++) {
-  //   source_id = rand() % nn;
-  //   printf("source = %d\n", source_id);
-  //   sssp( dps,
-  //         nn, h_graph_nodes, h_up_cost, h_mask,
-  //         ne, h_graph_edges, h_graph_weights,
-  //         source_id,
-  //         h_cost );
-  // }
-
   /********************************************************************************/
 
   printf("Computation finished\n");
@@ -371,4 +367,8 @@ int32 main( int32 argc, char** argv) {
   CUDA_CHECK_RETURN(cudaFree(dps.finished));
   CUDA_CHECK_RETURN(cudaDeviceReset());
   return 0;
+}
+
+int32 main( int32 argc, char** argv) {
+  return build_oracle();
 }
